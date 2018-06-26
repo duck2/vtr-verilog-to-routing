@@ -22,6 +22,8 @@ set(ACE_SUPPRESS_FLAGS
         -Wno-int-to-pointer-cast
         )
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${FLAGS_COMMON} -D__STDC_LIMIT_MACROS -D__STDC_FORMAT_MACROS -std=c++11")
+
 include(CheckCXXCompilerFlag)
 foreach(flag ${ACE_SUPPRESS_FLAGS})
     CHECK_CXX_COMPILER_FLAG(${flag} CXX_COMPILER_SUPPORTS_${flag})
