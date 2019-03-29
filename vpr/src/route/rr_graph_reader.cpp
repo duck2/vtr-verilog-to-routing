@@ -97,6 +97,59 @@ static std::vector<cached_edge> cached_edges;
 static t_chan_width *chan_width;
 static const DeviceGrid *g_grid;
 
+/*
+enum {
+	T_RR_GRAPH = 0,
+	T_CHANNELS = 1,
+	T_SWITCHES = 2,
+	T_SEGMENTS = 3,
+	T_BLOCK_TYPES = 4,
+	T_GRID = 5,
+	T_RR_NODES = 6,
+	T_RR_EDGES = 7,
+	T_CHANNEL = 8,
+	T_X_LIST = 9,
+	T_Y_LIST = 10,
+	T_SWITCH = 11,
+	T_TIMING = 12,
+	T_SIZING = 13,
+	T_SEGMENT = 14,
+	T_BLOCK_TYPE = 15,
+	T_PIN_CLASS = 16,
+	T_PIN = 17,
+	T_GRID_LOC = 18,
+	T_NODE = 19,
+	T_EDGE = 20,
+	T_METADATA = 21,
+	T_META = 22
+} tag_type;
+static std::unordered_map<std::string, tag_type> tag_map = {
+	T_RR_GRAPH = 0,
+	T_CHANNELS = 1,
+	T_SWITCHES = 2,
+	T_SEGMENTS = 3,
+	T_BLOCK_TYPES = 4,
+	T_GRID = 5,
+	T_RR_NODES = 6,
+	T_RR_EDGES = 7,
+	T_CHANNEL = 8,
+	T_X_LIST = 9,
+	T_Y_LIST = 10,
+	T_SWITCH = 11,
+	T_TIMING = 12,
+	T_SIZING = 13,
+	T_SEGMENT = 14,
+	T_BLOCK_TYPE = 15,
+	T_PIN_CLASS = 16,
+	T_PIN = 17,
+	T_GRID_LOC = 18,
+	T_NODE = 19,
+	T_EDGE = 20,
+	T_METADATA = 21,
+	T_META = 22
+}
+*/
+
 /* A mapping from the previous tag and current tag to the function to call. */
 static std::unordered_map<std::string, std::unordered_map<std::string, void(*)(AttributeMap&)>> parse_table = {
 		{"rr_graph", {
@@ -185,12 +238,19 @@ void load_rr_file(const t_graph_type graph_type,
 	chan_width = &nodes_per_chan;
 	g_grid = &grid;
 
+	/* First clear the previous rr_graph in case this gets called twice. XXX: what else global vars to clear? */
+	cached_edges.clear();
+	device_ctx.rr_nodes.clear();
+	device_ctx.rr_switch_inf.clear();
+
 	/* Decode the graph_type */
 	bool is_global_graph = (GRAPH_GLOBAL == graph_type ? true : false);
 
 	/* Global routing uses a single longwire track */
 	int max_chan_width = (is_global_graph ? 1 : nodes_per_chan.max);
 	VTR_ASSERT(max_chan_width > 0);
+
+	VTR_LOG("Starting to build routing resource graph...\n");
 
 	/* Start the parser. The SAX parser's handlers will consume the nodes. */
 	sax_handler.startElement = on_start_element;
@@ -292,7 +352,6 @@ void on_characters(void *ctx, const xmlChar *_ch, int len){
 			auto& node = device_ctx.rr_nodes.back();
 			node.add_metadata(current_meta_o, current_meta_name, current_meta_value);
 		} else if(current_meta_place == EDGE){
-			VTR_ASSERT(cached_edges.size() > 1);
 			auto &edge = cached_edges.back();
 			auto &node = device_ctx.rr_nodes[edge.src_node_id];
 			node.add_edge_metadata(edge.sink_node_id, edge.switch_id,
@@ -346,7 +405,7 @@ void consume_y_list(AttributeMap& attrs){
 void consume_switch(AttributeMap& attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	t_rr_switch_inf sw = {};
-	if(sw.name != "") sw.name = attrs["name"].c_str();
+	if(attrs["name"] != "") sw.name = vtr::strdup(attrs["name"].c_str());
 	std::string type = attrs["type"];
 	if(type == "mux") sw.set_type(SwitchType::MUX);
 	else if(type == "tristate") sw.set_type(SwitchType::TRISTATE);
@@ -481,7 +540,7 @@ void consume_node_loc(AttributeMap& attrs){
 		else if(side == "TOP") node.set_side(TOP);
 		else {
 			VTR_ASSERT(side == "BOTTOM");
-			side = BOTTOM;
+			node.set_side(BOTTOM);
 		}
 	}
 }
@@ -529,7 +588,7 @@ void consume_edge(AttributeMap& attrs){
 	edge.src_node_id = std::stoi(attrs["src_node"]);
 	edge.sink_node_id = std::stoi(attrs["sink_node"]);
 	edge.switch_id = std::stoi(attrs["switch_id"]);
-	cached_edges.push_back(edge);
+	cached_edges.push_back(std::move(edge));
 }
 
 /* Process the cached edges. */
@@ -578,7 +637,6 @@ void process_edges(int *wire_to_rr_ipin_switch, int num_rr_switches){
 void process_rr_node_indices(const DeviceGrid& grid) {
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 
-	std::cout << "loop1\n";
 	/* Alloc the lookup table */
 	auto& indices = device_ctx.rr_node_indices;
 	indices.resize(NUM_RR_TYPES);
@@ -602,7 +660,6 @@ void process_rr_node_indices(const DeviceGrid& grid) {
 		}
 	}
 
-	std::cout << "loop2\n";
 	/* Add the correct node into the vector
 	 * Note that CHANX and CHANY 's x and y are swapped due to the chan and seg convention.
 	 * Push back temporary incorrect nodes for CHANX and CHANY to set the length of the vector */
@@ -624,7 +681,6 @@ void process_rr_node_indices(const DeviceGrid& grid) {
 		} else if (node.type() == IPIN || node.type() == OPIN) {
 			for (int ix = node.xlow(); ix <= node.xhigh(); ix++) {
 				for (int iy = node.ylow(); iy <= node.yhigh(); iy++) {
-
 					if (node.type() == OPIN) {
 						indices[OPIN][ix][iy][node.side()].push_back(inode);
 						indices[IPIN][ix][iy][node.side()].push_back(OPEN);
@@ -650,7 +706,6 @@ void process_rr_node_indices(const DeviceGrid& grid) {
 		}
 	}
 
-	std::cout << "loop3\n";
 	int count;
 	/* CHANX and CHANY need to reevaluated with its ptc num as the correct index */
 	for (size_t inode = 0; inode < device_ctx.rr_nodes.size(); inode++) {
@@ -672,7 +727,6 @@ void process_rr_node_indices(const DeviceGrid& grid) {
 		}
 	}
 
-	std::cout << "loop4\n";
 	// Copy the SOURCE/SINK nodes to all offset positions for blocks with width > 1 and/or height > 1
 	// This ensures that look-ups on non-root locations will still find the correct SOURCE/SINK
 	for (size_t x = 0; x < grid.width(); x++) {
