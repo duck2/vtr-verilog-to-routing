@@ -25,11 +25,13 @@ file(GLOB_RECURSE LIB_SOURCES src/*/*.cpp)
 file(GLOB_RECURSE LIB_HEADERS src/*/*.h)
 files_to_dirs(LIB_HEADERS LIB_INCLUDE_DIRS)
 
+find_package(LibXml2 REQUIRED)
+
 #Create the library
 add_library(libvpr STATIC
              ${LIB_HEADERS}
              ${LIB_SOURCES})
-target_include_directories(libvpr PUBLIC ${LIB_INCLUDE_DIRS})
+target_include_directories(libvpr PUBLIC ${LIBXML2_INCLUDE_DIR} ${LIB_INCLUDE_DIRS})
 set_target_properties(libvpr PROPERTIES PREFIX "") #Avoid extra 'lib' prefix
 
 #Specify link-time dependancies
@@ -41,6 +43,7 @@ target_link_libraries(libvpr
                         libeasygl
                         libtatum
                         libargparse
+			${LIBXML2_LIBRARIES}
                         libpugixml)
 
 #Create the executable
