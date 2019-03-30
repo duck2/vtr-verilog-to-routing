@@ -1137,6 +1137,10 @@ void vpr_analysis(t_vpr_setup& vpr_setup, const t_arch& Arch, const RouteStatus&
 
     routing_stats(vpr_setup.RouterOpts.full_stats, vpr_setup.RouterOpts.route_type,
             vpr_setup.Segments,
+<<<<<<< HEAD
+=======
+            vpr_setup.RoutingArch.num_segment,
+>>>>>>> 6e703a665... remove num_rr_switches
             vpr_setup.RoutingArch.R_minW_nmos,
             vpr_setup.RoutingArch.R_minW_pmos,
             Arch.grid_logic_tile_area,

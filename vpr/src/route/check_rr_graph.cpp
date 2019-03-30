@@ -70,7 +70,7 @@ void check_rr_graph(const t_graph_type graph_type,
 
             auto switch_type = device_ctx.rr_nodes[inode].edge_switch(iedge);
 
-            if (switch_type < 0 || switch_type >= num_rr_switches) {
+            if (switch_type < 0 || switch_type >= device_ctx.rr_switch_inf.size()) {
                 vpr_throw(VPR_ERROR_ROUTE, __FILE__, __LINE__,
                         "in check_rr_graph: node %d has a switch type %d.\n"
                         "\tSwitch type is out of range.\n",
@@ -117,7 +117,7 @@ void check_rr_graph(const t_graph_type graph_type,
 
                 auto switch_type = device_ctx.rr_switch_inf[kv.first].type();
 
-                VPR_THROW(VPR_ERROR_ROUTE, "in check_rr_graph: node %d has %d redundant connections to node %d of switch type %d (%s)", 
+                VPR_THROW(VPR_ERROR_ROUTE, "in check_rr_graph: node %d has %d redundant connections to node %d of switch type %d (%s)",
                           inode, kv.second, to_node, kv.first, SWITCH_TYPE_STRINGS[size_t(switch_type)]);
             }
         }

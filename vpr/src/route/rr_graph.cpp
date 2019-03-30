@@ -292,7 +292,7 @@ void create_rr_graph(
     if (channel_widths_unchanged(device_ctx.chan_width, nodes_per_chan) && !device_ctx.rr_nodes.empty()) {
         //No change in channel width, so skip re-building RR graph
         VTR_LOG("RR graph channel widths unchanged, skipping RR graph rebuild\n");
-        return;    
+        return;
     }
 
     free_rr_graph();
@@ -351,7 +351,7 @@ void create_rr_graph(
 }
 
 bool channel_widths_unchanged(const t_chan_width& current, const t_chan_width& proposed) {
-    
+
     if (current.max != proposed.max
         || current.x_max != proposed.x_max
         || current.y_max != proposed.y_max
@@ -725,8 +725,7 @@ static void build_rr_graph(
    Also changes switch indices of rr_nodes to index into rr_switch_inf
    instead of arch_switch_inf.
 
-   Returns the number of rr switches created.
-   Also returns, through a pointer, the index of a representative ipin cblock switch.
+   Returns, through a pointer, the index of a representative ipin cblock switch.
         - Currently we're not allowing a designer to specify an ipin cblock switch with
           multiple fan-ins, so there's just one of these switches in the device_ctx.rr_switch_inf array.
           But in the future if we allow this, we can return an index to a representative switch
@@ -779,15 +778,12 @@ static void alloc_and_load_rr_switch_inf(const int num_arch_switches, const floa
         VTR_LOG_WARN(
                 "No switch found for the ipin cblock in RR graph. Check if there is an error in arch file, or if no connection blocks are being built in RR graph\n");
     }
-
 }
 
-/* Allocates space for the global device_ctx.rr_switch_inf variable and returns the
-   number of rr switches that were allocated */
+/* Allocates space for the global device_ctx.rr_switch_inf vector. */
 static void alloc_rr_switch_inf(t_arch_switch_fanin& arch_switch_fanins) {
-    auto& device_ctx = g_vpr_ctx.mutable_device();
-
     int num_rr_switches = 0;
+    auto& device_ctx = g_vpr_ctx.mutable_device();
     {
         //Collect the fan-in per switch type for each node in the graph
         //
@@ -1171,7 +1167,7 @@ static void alloc_and_load_rr_graph(const int num_nodes,
         const t_clb_to_clb_directs *clb_to_clb_directs,
         bool is_global_graph) {
 
-    //We take special care when creating RR graph edges (there are typically many more 
+    //We take special care when creating RR graph edges (there are typically many more
     //edges than nodes in an RR graph).
     //
     //In particular, all the following build_*() functions do not create the edges, but
@@ -1181,7 +1177,7 @@ static void alloc_and_load_rr_graph(const int num_nodes,
     //the edges in alloc_and_load_edges().
     //
     //By doing things in this manner we ensure we know exactly how many edges leave each RR
-    //node, which avoids resizing the RR edge arrays (which can cause significant memory 
+    //node, which avoids resizing the RR edge arrays (which can cause significant memory
     //fragmentation, and significantly increasing peak memory usage). This is important since
     //RR graph creation is the high-watermark of VPR's memory use.
     t_rr_edge_info_set rr_edges_to_create;
@@ -1364,7 +1360,7 @@ void free_rr_graph() {
 }
 
 static void build_rr_sinks_sources(const int i, const int j,
-        std::vector<t_rr_node>& L_rr_node, 
+        std::vector<t_rr_node>& L_rr_node,
         t_rr_edge_info_set& rr_edges_to_create,
         const t_rr_node_indices& L_rr_node_indices,
         const int delayless_switch, const DeviceGrid& grid) {
@@ -2664,7 +2660,7 @@ static void build_unidir_rr_opins(const int i, const int j, const e_side side,
             /* Get the list of opin to mux connections for that chan seg. */
             bool clipped;
             get_unidir_opin_connections(chan, seg,
-                    seg_type_Fc, iseg, chan_type, seg_details, 
+                    seg_type_Fc, iseg, chan_type, seg_details,
                     opin_node_index,
                     rr_edges_to_create,
                     Fc_ofs, max_len, max_chan_width,
@@ -3038,7 +3034,7 @@ static int pick_best_direct_connect_target_rr_node(
 
     float best_dist = std::numeric_limits<float>::infinity();
     int best_rr = OPEN;
-    
+
     for (int to_rr : candidate_rr_nodes) {
         VTR_ASSERT(rr_nodes[to_rr].type() == IPIN);
         float to_dist = std::abs(rr_nodes[from_rr].xlow() - rr_nodes[to_rr].xlow())

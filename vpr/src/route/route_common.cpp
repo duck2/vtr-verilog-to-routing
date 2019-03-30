@@ -858,7 +858,7 @@ vtr::vector<ClusterNetId, t_trace *> alloc_saved_routing() {
 	return (best_routing);
 }
 
-//Calculates how many (and allocates space for) OPINs which must be reserved to 
+//Calculates how many (and allocates space for) OPINs which must be reserved to
 //respect 'instance' equivalence.
 //
 //TODO: At the moment this makes a significant simplifying assumption. It reserves
@@ -1143,15 +1143,15 @@ t_bb load_net_route_bb(ClusterNetId net_id, int bb_factor) {
 	 * the FPGA if necessary.  The bounding box returned by this routine
 	 * are different from the ones used by the placer in that they are
 	 * clipped to lie within (0,0) and (device_ctx.grid.width()-1,device_ctx.grid.height()-1)
-     * rather than (1,1) and (device_ctx.grid.width()-1,device_ctx.grid.height()-1).                                                            
+     * rather than (1,1) and (device_ctx.grid.width()-1,device_ctx.grid.height()-1).
      */
     auto& cluster_ctx = g_vpr_ctx.clustering();
     auto& device_ctx = g_vpr_ctx.device();
     auto& route_ctx = g_vpr_ctx.routing();
 
     //Ensure bb_factor is bounded by the device size
-    //This ensures that if someone passes in an extremely large bb_factor 
-    //(e.g. std::numeric_limits<int>::max()) the later addition/subtraction 
+    //This ensures that if someone passes in an extremely large bb_factor
+    //(e.g. std::numeric_limits<int>::max()) the later addition/subtraction
     //of bb_factor will not cause under/overflow
     int max_dim = std::max<int>(device_ctx.grid.width() - 1, device_ctx.grid.height() - 1);
     bb_factor = std::min(bb_factor, max_dim);
@@ -1600,20 +1600,20 @@ void print_route(const char* placement_file, const char* route_file) {
     route_ctx.routing_id = vtr::secure_digest_file(route_file);
 }
 
-//To ensure the router can only swaps pin which are actually logically equivalent some block output pins must be 
+//To ensure the router can only swaps pin which are actually logically equivalent some block output pins must be
 //reserved in certain cases.
 //
-// In the RR graph, output pin equivalence is modelled by a single SRC node connected to (multiple) OPINs, modelling 
+// In the RR graph, output pin equivalence is modelled by a single SRC node connected to (multiple) OPINs, modelling
 // that each of the OPINs is logcially equivalent (i.e. it doesn't matter through which the router routes a signal,
 // so long as it is from the appropriate SRC).
 //
-// This correctly models 'full' equivalence (e.g. if there is a full crossbar between the outputs), but is to 
-// optimistic for 'instance' equivalence (which typcially models the pin equivalence possible by swapping sub-block 
+// This correctly models 'full' equivalence (e.g. if there is a full crossbar between the outputs), but is to
+// optimistic for 'instance' equivalence (which typcially models the pin equivalence possible by swapping sub-block
 // instances like BLEs). In particular, for the 'instance' equivalence case, some of the 'equivalent' block outputs
-// may be used by internal signals which are routed entirely *within* the block (i.e. the signals which never leave 
+// may be used by internal signals which are routed entirely *within* the block (i.e. the signals which never leave
 // the block). These signals effectively 'use-up' an output pin which should now be unavailable to the router.
 //
-// To model this we 'reserve' these locally used outputs, ensuring that the router will not use them (as if it did 
+// To model this we 'reserve' these locally used outputs, ensuring that the router will not use them (as if it did
 // this would equate to duplicating a BLE into an already in-use BLE instance, which is clearly incorrect).
 void reserve_locally_used_opins(float pres_fac, float acc_fac, bool rip_up_local_opins) {
 
@@ -1656,7 +1656,7 @@ void reserve_locally_used_opins(float pres_fac, float acc_fac, bool rip_up_local
 
             //From the SRC node we walk through it's out going edges to collect the
             //OPIN nodes. We then push them onto a heap so the the OPINs with lower
-            //congestion cost are popped-off/reserved first. (Intuitively, we want 
+            //congestion cost are popped-off/reserved first. (Intuitively, we want
             //the reserved OPINs to move out of the way of congestion, by preferring
             //to reserve OPINs with lower congestion costs).
             from_node = route_ctx.rr_blk_source[blk_id][iclass];
@@ -1673,7 +1673,7 @@ void reserve_locally_used_opins(float pres_fac, float acc_fac, bool rip_up_local
 
             for (ipin = 0; ipin < num_local_opin; ipin++) {
                 //Pop the nodes off the heap. We get them from the heap so we
-                //reserve those pins with lowest congestion cost first. 
+                //reserve those pins with lowest congestion cost first.
                 heap_head_ptr = get_heap_head();
                 inode = heap_head_ptr->index;
 

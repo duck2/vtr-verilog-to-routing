@@ -40,7 +40,7 @@ struct t_non_configurable_rr_sets {
 static void check_node_and_range(int inode, enum e_route_type route_type);
 static void check_source(int inode, ClusterNetId net_id);
 static void check_sink(int inode, ClusterNetId net_id, bool * pin_done);
-static void check_switch(t_trace *tptr, int num_switch);
+static void check_switch(t_trace *tptr);
 static bool check_adjacent(int from_node, int to_node);
 static int chanx_chany_adjacent(int chanx_node, int chany_node);
 static void reset_flags(ClusterNetId inet, bool * connected_to_route);
@@ -117,7 +117,7 @@ void check_route(enum e_route_type route_type) {
 
 		inode = tptr->index;
 		check_node_and_range(inode, route_type);
-		check_switch(tptr, num_switches);
+		check_switch(tptr);
 		connected_to_route[inode] = true; /* Mark as in path. */
 
 		check_source(inode, net_id);
@@ -132,7 +132,7 @@ void check_route(enum e_route_type route_type) {
 		while (tptr != nullptr) {
 			inode = tptr->index;
 			check_node_and_range(inode, route_type);
-			check_switch(tptr, num_switches);
+			check_switch(tptr);
 
 			if (prev_switch == OPEN) { //Start of a new branch
 				if (connected_to_route[inode] == false) {
@@ -283,7 +283,7 @@ static void check_source(int inode, ClusterNetId net_id) {
 	}
 }
 
-static void check_switch(t_trace *tptr, int num_switch) {
+static void check_switch(t_trace *tptr) {
 
 	/* Checks that the switch leading from this traceback element to the next *
 	 * one is a legal switch type.                                            */
@@ -297,7 +297,8 @@ static void check_switch(t_trace *tptr, int num_switch) {
 	switch_type = tptr->iswitch;
 
 	if (device_ctx.rr_nodes[inode].type() != SINK) {
-		if (switch_type >= num_switch) {
+		std::cout << device_ctx.rr_switch_inf.size() << "\n";
+		if (switch_type >= (short)device_ctx.rr_switch_inf.size()) {
 			vpr_throw(VPR_ERROR_ROUTE, __FILE__, __LINE__,
 				"in check_switch: rr_node %d left via switch type %d.\n"
 				"\tSwitch type is out of range.\n", inode, switch_type);

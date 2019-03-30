@@ -73,7 +73,7 @@ void consume_meta(AttributeMap& attrs);
 void consume_edge(AttributeMap& attrs);
 void consume_edge_metadata(AttributeMap& attrs);
 
-void process_edges(int *wire_to_rr_ipin_switch, int num_rr_switches);
+void process_edges(int *wire_to_rr_ipin_switch);
 void process_rr_node_indices(const DeviceGrid& grid);
 void set_cost_indices(bool is_global_graph, const int num_seg_types);
 void process_seg_id();
@@ -124,29 +124,10 @@ enum {
 	T_META = 22
 } tag_type;
 static std::unordered_map<std::string, tag_type> tag_map = {
-	T_RR_GRAPH = 0,
-	T_CHANNELS = 1,
-	T_SWITCHES = 2,
-	T_SEGMENTS = 3,
-	T_BLOCK_TYPES = 4,
-	T_GRID = 5,
-	T_RR_NODES = 6,
-	T_RR_EDGES = 7,
-	T_CHANNEL = 8,
-	T_X_LIST = 9,
-	T_Y_LIST = 10,
-	T_SWITCH = 11,
-	T_TIMING = 12,
-	T_SIZING = 13,
-	T_SEGMENT = 14,
-	T_BLOCK_TYPE = 15,
-	T_PIN_CLASS = 16,
-	T_PIN = 17,
-	T_GRID_LOC = 18,
-	T_NODE = 19,
-	T_EDGE = 20,
-	T_METADATA = 21,
-	T_META = 22
+	{"rr_graph", T_RR_GRAPH},
+	{"channels", T_CHANNELS},
+	{"switches", T_SWITCHES},
+	{"segments", T_
 }
 */
 
@@ -224,7 +205,6 @@ void load_rr_file(const t_graph_type graph_type,
 		const t_segment_inf * segment_inf,
 		const enum e_base_cost_type base_cost_type,
 		int *wire_to_rr_ipin_switch,
-		int *num_rr_switches,
 		const char* read_rr_graph_name) {
 
 	vtr::ScopedStartFinishTimer timer("Loading routing resource graph");
@@ -267,8 +247,7 @@ void load_rr_file(const t_graph_type graph_type,
 	xmlFreeParserCtxt(ctx);
 
 	/* Process the cached edges. */
-	*num_rr_switches = device_ctx.rr_switch_inf.size();
-	process_edges(wire_to_rr_ipin_switch, *num_rr_switches);
+	process_edges(wire_to_rr_ipin_switch);
 
 	/* Partition the rr graph edges for efficient access to configurable/non-configurable edge subsets. */
 	partition_rr_graph_edges(device_ctx);
@@ -287,7 +266,7 @@ void load_rr_file(const t_graph_type graph_type,
 	if (getEchoEnabled() && isEchoFileEnabled(E_ECHO_RR_GRAPH)) {
 		dump_rr_graph(getEchoFileName(E_ECHO_RR_GRAPH));
 	}
-	check_rr_graph(graph_type, grid, *num_rr_switches, device_ctx.block_types);
+	check_rr_graph(graph_type, grid, device_ctx.block_types);
 }
 
 /* Handle a new element's start like <node capacity=...> */
@@ -592,7 +571,7 @@ void consume_edge(AttributeMap& attrs){
 }
 
 /* Process the cached edges. */
-void process_edges(int *wire_to_rr_ipin_switch, int num_rr_switches){
+void process_edges(int *wire_to_rr_ipin_switch){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	std::vector<int> num_edges_for_node;
 	num_edges_for_node.resize(device_ctx.rr_nodes.size(), 0);
@@ -615,7 +594,7 @@ void process_edges(int *wire_to_rr_ipin_switch, int num_rr_switches){
 	}
 	/* finally get and store the most frequent switch that connects a CHANX/CHANY node to an IPIN node. */
 	std::vector<int> count_for_wire_to_ipin_switches;
-	count_for_wire_to_ipin_switches.resize(num_rr_switches, 0);
+	count_for_wire_to_ipin_switches.resize(device_ctx.rr_switch_inf.size(), 0);
 	struct {int id; int count;} most_frequent_switch = {-1, 0};
 	for(auto e: cached_edges){
 		auto& source_node = device_ctx.rr_nodes[e.src_node_id];

@@ -109,7 +109,7 @@ std::vector<float> calculate_all_path_delays_from_rr_node(int src_rr_node, const
             if (shortest_paths[sink_rr_node].index == OPEN) continue;
 
             VTR_ASSERT(shortest_paths[sink_rr_node].index == sink_rr_node);
-            
+
             //Build the routing tree to get the delay
             rt_root = setup_routing_resources_no_net(src_rr_node);
             t_rt_node* rt_node_of_sink = update_route_tree(&shortest_paths[sink_rr_node], nullptr);
@@ -129,7 +129,7 @@ std::vector<float> calculate_all_path_delays_from_rr_node(int src_rr_node, const
     for (int sink_rr_node = 0; sink_rr_node < (int) device_ctx.rr_nodes.size(); ++sink_rr_node) {
 
         float astar_delay = std::numeric_limits<float>::quiet_NaN();
-        if (sink_rr_node == src_rr_node) { 
+        if (sink_rr_node == src_rr_node) {
             astar_delay = 0.;
         } else {
             calculate_delay(src_rr_node, sink_rr_node, router_opts, &astar_delay);

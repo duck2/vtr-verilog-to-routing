@@ -26,7 +26,7 @@ static const e_trans_area_eq trans_area_eq = AREA_IMPROVED_NMOS_ONLY;
 
 /************************ Subroutines local to this module *******************/
 
-static void count_bidir_routing_transistors(int num_switch, int wire_to_ipin_switch,
+static void count_bidir_routing_transistors(int wire_to_ipin_switch,
 		float R_minW_nmos, float R_minW_pmos, const float trans_sram_bit);
 
 static void count_unidir_routing_transistors(std::vector<t_segment_inf>& segment_inf,
@@ -36,11 +36,9 @@ static void count_unidir_routing_transistors(std::vector<t_segment_inf>& segment
 static float get_cblock_trans(int *num_inputs_to_cblock, int wire_to_ipin_switch,
 		int max_inputs_to_cblock, float trans_sram_bit);
 
-static float *alloc_and_load_unsharable_switch_trans(int num_switch,
-		float trans_sram_bit, float R_minW_nmos);
+static float *alloc_and_load_unsharable_switch_trans(float trans_sram_bit, float R_minW_nmos);
 
-static float *alloc_and_load_sharable_switch_trans(int num_switch,
-		float R_minW_nmos, float R_minW_pmos);
+static float *alloc_and_load_sharable_switch_trans(float R_minW_nmos, float R_minW_pmos);
 
 static float trans_per_mux(int num_inputs, float trans_sram_bit,
 		float pass_trans_area);
@@ -50,7 +48,7 @@ static float trans_per_R(float Rtrans, float R_minW_trans);
 /*************************** Subroutine definitions **************************/
 
 void count_routing_transistors(enum e_directionality directionality,
-		int num_switch, int wire_to_ipin_switch, std::vector<t_segment_inf>& segment_inf,
+		int wire_to_ipin_switch, t_segment_inf * segment_inf,
 		float R_minW_nmos, float R_minW_pmos) {
 
 	/* Counts how many transistors are needed to implement the FPGA routing      *
@@ -69,14 +67,14 @@ void count_routing_transistors(enum e_directionality directionality,
 	const float trans_sram_bit = 4.;
 
 	if (directionality == BI_DIRECTIONAL) {
-		count_bidir_routing_transistors(num_switch, wire_to_ipin_switch, R_minW_nmos, R_minW_pmos, trans_sram_bit);
+		count_bidir_routing_transistors(wire_to_ipin_switch, R_minW_nmos, R_minW_pmos, trans_sram_bit);
 	} else {
 		VTR_ASSERT(directionality == UNI_DIRECTIONAL);
 		count_unidir_routing_transistors(segment_inf, wire_to_ipin_switch, R_minW_nmos, R_minW_pmos, trans_sram_bit);
 	}
 }
 
-void count_bidir_routing_transistors(int num_switch, int wire_to_ipin_switch,
+void count_bidir_routing_transistors(int wire_to_ipin_switch,
 		float R_minW_nmos, float R_minW_pmos, const float trans_sram_bit) {
 
 	/* Tri-state buffers are designed as a buffer followed by a pass transistor. *
@@ -150,11 +148,9 @@ void count_bidir_routing_transistors(int num_switch, int wire_to_ipin_switch,
 	cblock_counted = (bool *) vtr::calloc(maxlen, sizeof(bool));
 	shared_buffer_trans = (float *) vtr::calloc(maxlen, sizeof(float));
 
-	unsharable_switch_trans = alloc_and_load_unsharable_switch_trans(num_switch,
-			trans_sram_bit, R_minW_nmos);
+	unsharable_switch_trans = alloc_and_load_unsharable_switch_trans(trans_sram_bit, R_minW_nmos);
 
-	sharable_switch_trans = alloc_and_load_sharable_switch_trans(num_switch,
-			R_minW_nmos, R_minW_pmos);
+	sharable_switch_trans = alloc_and_load_sharable_switch_trans(R_minW_nmos, R_minW_pmos);
 
 	for (size_t from_node = 0; from_node < device_ctx.rr_nodes.size(); from_node++) {
 
@@ -526,7 +522,7 @@ static float get_cblock_trans(int *num_inputs_to_cblock, int wire_to_ipin_switch
 }
 
 static float *
-alloc_and_load_unsharable_switch_trans(int num_switch, float trans_sram_bit,
+alloc_and_load_unsharable_switch_trans(float trans_sram_bit,
 		float R_minW_nmos) {
 
 	/* Loads up an array that says how many transistors are needed to implement  *
@@ -539,9 +535,9 @@ alloc_and_load_unsharable_switch_trans(int num_switch, float trans_sram_bit,
 
     auto& device_ctx = g_vpr_ctx.device();
 
-	unsharable_switch_trans = (float *) vtr::malloc(num_switch * sizeof(float));
+	unsharable_switch_trans = (float *) vtr::malloc(device_ctx.rr_switch_inf.size() * sizeof(float));
 
-	for (i = 0; i < num_switch; i++) {
+	for (i = 0; i < device_ctx.rr_switch_inf.size(); i++) {
 
         if (device_ctx.rr_switch_inf[i].type() == SwitchType::SHORT) {
             //Electrical shorts do not use any transistors
@@ -567,8 +563,7 @@ alloc_and_load_unsharable_switch_trans(int num_switch, float trans_sram_bit,
 }
 
 static float *
-alloc_and_load_sharable_switch_trans(int num_switch,
-		float R_minW_nmos, float R_minW_pmos) {
+alloc_and_load_sharable_switch_trans(float R_minW_nmos, float R_minW_pmos) {
 
 	/* Loads up an array that says how many transistor are needed to implement   *
 	 * the sharable portion of each switch type.  The SRAM bit of a switch and   *
@@ -581,9 +576,9 @@ alloc_and_load_sharable_switch_trans(int num_switch,
 
     auto& device_ctx = g_vpr_ctx.device();
 
-	sharable_switch_trans = (float *) vtr::malloc(num_switch * sizeof(float));
+	sharable_switch_trans = (float *) vtr::malloc(device_ctx.rr_switch_inf.size() * sizeof(float));
 
-	for (i = 0; i < num_switch; i++) {
+	for (i = 0; i < device_ctx.rr_switch_inf.size(); i++) {
 
 		if (!device_ctx.rr_switch_inf[i].buffered()) {
 			sharable_switch_trans[i] = 0.;

@@ -101,7 +101,7 @@ void routing_stats(bool full_stats, enum e_route_type route_type,
 	VTR_LOG("\tTotal used logic block area: %g\n", used_area);
 
 	if (route_type == DETAILED) {
-		count_routing_transistors(directionality, num_rr_switch, wire_to_ipin_switch,
+		count_routing_transistors(directionality, wire_to_ipin_switch,
 				segment_inf, R_minW_nmos, R_minW_pmos);
 		get_segment_usage_stats(segment_inf);
 
