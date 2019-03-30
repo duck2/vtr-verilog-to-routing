@@ -48,7 +48,7 @@ static float trans_per_R(float Rtrans, float R_minW_trans);
 /*************************** Subroutine definitions **************************/
 
 void count_routing_transistors(enum e_directionality directionality,
-		int wire_to_ipin_switch, t_segment_inf * segment_inf,
+		int wire_to_ipin_switch, std::vector<t_segment_inf>& segment_inf,
 		float R_minW_nmos, float R_minW_pmos) {
 
 	/* Counts how many transistors are needed to implement the FPGA routing      *

@@ -83,7 +83,6 @@ static std::stack <const char *> parser_stack;
 static xmlSAXHandler sax_handler = {};
 
 /* We need to build the current <meta> node piece by piece here. */
-static t_offset current_meta_o = {};
 static std::string current_meta_name;
 static std::string current_meta_value;
 static enum {NODE, EDGE} current_meta_place;
@@ -92,6 +91,11 @@ static enum {NODE, EDGE} current_meta_place;
  * Note that we are not caching edge metadata, they can be read right into device_ctx. */
 struct cached_edge { int src_node_id; int sink_node_id; int switch_id; };
 static std::vector<cached_edge> cached_edges;
+
+/* current_node_id is kept because we need to build a map from node IDs to segment IDs
+ * and t_rr_node does not hold IDs.
+ * !! Also note that it's assumed that nodes appear in ID order and no ID gaps occur. */
+static int current_node_id;
 
 /* hoist pointers to arguments to load_rr_file: we need to access them from SAX handlers */
 static t_chan_width *chan_width;
@@ -199,10 +203,6 @@ void load_rr_file(const t_graph_type graph_type,
 		const DeviceGrid& grid,
 		t_chan_width nodes_per_chan,
 		const std::vector<t_segment_inf>& segment_inf,
-		const DeviceGrid& grid,
-		t_chan_width nodes_per_chan,
-		const int num_seg_types,
-		const t_segment_inf * segment_inf,
 		const enum e_base_cost_type base_cost_type,
 		int *wire_to_rr_ipin_switch,
 		const char* read_rr_graph_name) {
@@ -255,8 +255,8 @@ void load_rr_file(const t_graph_type graph_type,
 	init_fan_in(device_ctx.rr_nodes, device_ctx.rr_nodes.size());
 
 	/* Set the cost index and seg id information. */
-	set_cost_indices(is_global_graph, num_seg_types);
-	alloc_and_load_rr_indexed_data(segment_inf, num_seg_types, device_ctx.rr_node_indices,
+	set_cost_indices(is_global_graph, segment_inf.size());
+	alloc_and_load_rr_indexed_data(segment_inf, device_ctx.rr_node_indices,
 		max_chan_width, *wire_to_rr_ipin_switch, base_cost_type);
 	process_seg_id();
 
@@ -328,13 +328,11 @@ void on_characters(void *ctx, const xmlChar *_ch, int len){
 		strncpy(text, ch, len);
 		current_meta_value = std::string(text);
 		if(current_meta_place == NODE){
-			auto& node = device_ctx.rr_nodes.back();
-			node.add_metadata(current_meta_o, current_meta_name, current_meta_value);
+			vpr::add_rr_node_metadata(current_node_id, current_meta_name, current_meta_value);
 		} else if(current_meta_place == EDGE){
 			auto &edge = cached_edges.back();
-			auto &node = device_ctx.rr_nodes[edge.src_node_id];
-			node.add_edge_metadata(edge.sink_node_id, edge.switch_id,
-								current_meta_o, current_meta_name, current_meta_value);
+			vpr::add_rr_edge_metadata(edge.src_node_id, edge.sink_node_id, edge.switch_id,
+								current_meta_name, current_meta_value);
 		}
 	}
 }
@@ -433,7 +431,6 @@ void consume_pin_class(AttributeMap& attrs){
 void consume_pin(AttributeMap& attrs){
 	return;
 }
->>>>>>> 925e908e5... initiate rr_graph reader with SAX
 
 /* Grid was initialized from the architecture file. Therefore, we don't need
  * to copy grid_locs into memory but we can check them against the arch file. */
@@ -459,11 +456,7 @@ void consume_grid_loc(AttributeMap& attrs){
 }
 
 /* Process node info and push it back to device_ctx.rr_nodes[]. When <loc> or <timing> arrives,
- * the corresponding callback picks up the last item in device_ctx.rr_nodes[] and continues to fill it.
- * current_node_id is kept because we need to build a map from node IDs to segment IDs and t_rr_node
- * does not hold IDs.
- * !! Also note that it's assumed that nodes appear in ID order and no ID gaps occur. */
-static int current_node_id;
+ * the corresponding callback picks up the last item in device_ctx.rr_nodes[] and continues to fill it. */
 void consume_node(AttributeMap& attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	t_rr_node node;
@@ -554,11 +547,7 @@ void consume_edge_metadata(AttributeMap& attrs){
 	current_meta_place = EDGE;
 }
 void consume_meta(AttributeMap& attrs){
-	current_meta_o = {0, 0, 0};
 	current_meta_name = attrs["name"];
-	if(attrs["x_offset"] != "") current_meta_o.x = std::stoi(attrs["x_offset"]);
-	if(attrs["y_offset"] != "") current_meta_o.y = std::stoi(attrs["y_offset"]);
-	if(attrs["z_offset"] != "") current_meta_o.z = std::stoi(attrs["z_offset"]);
 }
 
 /* Cache the edge for further processing. Note that we do not cache the metadata. */

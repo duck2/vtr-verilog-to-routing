@@ -61,8 +61,6 @@ void routing_stats(bool full_stats, enum e_route_type route_type,
     auto& device_ctx = g_vpr_ctx.device();
     auto& cluster_ctx = g_vpr_ctx.clustering();
 
-    int num_rr_switch = device_ctx.rr_switch_inf.size();
-
     length_and_bends_stats();
     print_channel_stats();
 	get_channel_occupancy_stats();
