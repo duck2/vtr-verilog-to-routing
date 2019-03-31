@@ -37,41 +37,41 @@
 
 #include <libxml/parser.h>
 
-typedef std::unordered_map<std::string, std::string> AttributeMap;
-
 /********************* Subroutines local to this module *******************/
 void load_rr_file(const char *name);
+const char *get_attr(const char *name, const char **attrs);
+const char *get_attr_optional(const char *name, const char **attrs);
 void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs);
 void on_end_element(void *ctx, const xmlChar *name);
 void on_characters(void *ctx, const xmlChar *ch, int len);
 
-void consume_channels(AttributeMap& attrs);
-void consume_switches(AttributeMap& attrs);
-void consume_segments(AttributeMap& attrs);
-void consume_block_types(AttributeMap& attrs);
-void consume_grid(AttributeMap& attrs);
-void consume_rr_nodes(AttributeMap& attrs);
-void consume_rr_edges(AttributeMap& attrs);
-void consume_channel(AttributeMap& attrs);
-void consume_x_list(AttributeMap& attrs);
-void consume_y_list(AttributeMap& attrs);
-void consume_switch(AttributeMap& attrs);
-void consume_switch_timing(AttributeMap& attrs);
-void consume_switch_sizing(AttributeMap& attrs);
-void consume_segment(AttributeMap& attrs);
-void consume_segment_timing(AttributeMap& attrs);
-void consume_block_type(AttributeMap& attrs);
-void consume_pin_class(AttributeMap& attrs);
-void consume_pin(AttributeMap& attrs);
-void consume_grid_loc(AttributeMap& attrs);
-void consume_node(AttributeMap& attrs);
-void consume_node_loc(AttributeMap& attrs);
-void consume_node_timing(AttributeMap& attrs);
-void consume_node_segment(AttributeMap& attrs);
-void consume_node_metadata(AttributeMap& attrs);
-void consume_meta(AttributeMap& attrs);
-void consume_edge(AttributeMap& attrs);
-void consume_edge_metadata(AttributeMap& attrs);
+void consume_channels(const char ** attrs);
+void consume_switches(const char ** attrs);
+void consume_segments(const char ** attrs);
+void consume_block_types(const char ** attrs);
+void consume_grid(const char ** attrs);
+void consume_rr_nodes(const char ** attrs);
+void consume_rr_edges(const char ** attrs);
+void consume_channel(const char ** attrs);
+void consume_x_list(const char ** attrs);
+void consume_y_list(const char ** attrs);
+void consume_switch(const char ** attrs);
+void consume_switch_timing(const char ** attrs);
+void consume_switch_sizing(const char ** attrs);
+void consume_segment(const char ** attrs);
+void consume_segment_timing(const char ** attrs);
+void consume_block_type(const char ** attrs);
+void consume_pin_class(const char ** attrs);
+void consume_pin(const char ** attrs);
+void consume_grid_loc(const char ** attrs);
+void consume_node(const char ** attrs);
+void consume_node_loc(const char ** attrs);
+void consume_node_timing(const char ** attrs);
+void consume_node_segment(const char ** attrs);
+void consume_node_metadata(const char ** attrs);
+void consume_meta(const char ** attrs);
+void consume_edge(const char ** attrs);
+void consume_edge_metadata(const char ** attrs);
 
 void process_edges(int *wire_to_rr_ipin_switch);
 void process_rr_node_indices(const DeviceGrid& grid);
@@ -199,11 +199,11 @@ public:
 	/* This works because the first [] is handled by this function,
 	 * returning an array of function pointers, which can be then regularly
 	 * accessed with the second []. */
-	void(**operator[](size_t index))(AttributeMap&) const {
+	void(**operator[](size_t index))(const char **) const {
 		return table[index];
 	}
 private:
-	void(*table[32][32])(AttributeMap&);
+	void(*table[32][32])(const char **);
 };
 static ParseTableClass parse_table;
 
@@ -284,7 +284,24 @@ void load_rr_file(const t_graph_type graph_type,
 	check_rr_graph(graph_type, grid, device_ctx.block_types);
 }
 
-/* Handle a new element's start like <node capacity=...> */
+/* Grab an attribute from the array of attributes. Throw if not found. */
+const char *get_attr(const char *name, const char **attrs){
+	for(const char **c = attrs; c && *c; c += 2){
+		if(strcmp(*c, name) == 0) return *(c+1);
+	}
+	/* TODO: Give line or tag information here? */
+	vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__, "Required attribute %s not present.", name);
+}
+
+/* Grab an attribute from the array of attributes. Return NULL if not found. */
+const char *get_attr_optional(const char *name, const char **attrs){
+	for(const char **c = attrs; c && *c; c += 2){
+		if(strcmp(*c, name) == 0) return *(c+1);
+	}
+	return NULL;
+}
+
+/* Handle a new element's start, like <node capacity=...> */
 void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs){
 	const char *name = (const char *)_name;
 	const char **attrs = (const char **)_attrs;
@@ -293,26 +310,23 @@ void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs){
 	if(current_tag == 0)
 		vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__, "Unrecognized tag <%s>.", name);
 
-	/* Convert attributes to hashtable first. */
-	AttributeMap attr_map;
-	for(const char **c = attrs; c && *c; c += 2){
-		attr_map[*c] = *(c+1);
-	}
-
 	/* Handle the first tag. */
 	if(parser_stack_top == -1){
 		if(strcmp(name, "rr_graph") == 0){
 			parser_stack[0] = T_RR_GRAPH;
 			parser_stack_top = 0;
-			if(attr_map["tool_version"] != "" && attr_map["tool_version"] != vtr::VERSION){
+			const char *tool_version = get_attr_optional("tool_version", attrs);
+			if(tool_version != NULL && std::strcmp(tool_version, vtr::VERSION) != 0){
 				VTR_LOG("\n");
-				VTR_LOG_WARN("This architecture version is for VPR %s while your current VPR version is %s, compatibility issues may arise.\n", attr_map["tool_version"].c_str(), vtr::VERSION);
+				VTR_LOG_WARN("This architecture version is for VPR %s while your current VPR version is %s, compatibility issues may arise.\n", tool_version, vtr::VERSION);
 				VTR_LOG("\n");
 			}
+
 			std::string correct_string = "Generated from arch file " + std::string(get_arch_file_name());
-			if(attr_map["tool_comment"] != "" && attr_map["tool_comment"] != correct_string){
+			const char *tool_comment = get_attr_optional("tool_comment", attrs);
+			if(tool_comment != NULL && correct_string != tool_comment){
 				VTR_LOG("\n");
-				VTR_LOG_WARN("This RR graph file is based on %s while your input architecture file is %s, compatibility issues may arise.\n", attr_map["tool_comment"].c_str(), get_arch_file_name());
+				VTR_LOG_WARN("This RR graph file is based on %s while your input architecture file is %s, compatibility issues may arise.\n", tool_comment, get_arch_file_name());
 				VTR_LOG("\n");
 			}
 		} else {
@@ -328,7 +342,7 @@ void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs){
 	/* Look up callback function from current and previous tags. */
 	auto fn = parse_table[prev_tag][current_tag];
 	if(fn != NULL){
-		(*fn)(attr_map);
+		(*fn)(attrs);
 		return;
 	}
 	/* TODO: Maybe implement reverse enum lookup for this. */
@@ -359,53 +373,56 @@ void on_characters(void *ctx, const xmlChar *_ch, int len){
 	}
 }
 
-void consume_channels(AttributeMap& attrs){
+
+void consume_channels(const char **attrs){
 	return;
 }
-void consume_switches(AttributeMap& attrs){
+void consume_switches(const char **attrs){
 	return;
 }
-void consume_segments(AttributeMap& attrs){
+void consume_segments(const char **attrs){
 	return;
 }
-void consume_block_types(AttributeMap& attrs){
+void consume_block_types(const char **attrs){
 	return;
 }
-void consume_grid(AttributeMap& attrs){
+void consume_grid(const char **attrs){
 	return;
 }
-void consume_rr_nodes(AttributeMap& attrs){
+void consume_rr_nodes(const char **attrs){
 	return;
 }
-void consume_rr_edges(AttributeMap& attrs){
+void consume_rr_edges(const char **attrs){
 	return;
 }
 /* Load channel info into chan_width(nodes_per_chan in load_rr_file) */
-void consume_channel(AttributeMap& attrs){
+void consume_channel(const char **attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
-	chan_width->max = std::stoi(attrs["chan_width_max"]);
-	chan_width->x_min = std::stoi(attrs["x_min"]);
-	chan_width->y_min = std::stoi(attrs["y_min"]);
-	chan_width->x_max = std::stoi(attrs["x_max"]);
-	chan_width->y_max = std::stoi(attrs["y_max"]);
+	chan_width->max = std::atoi(get_attr("chan_width_max", attrs));
+	chan_width->x_min = std::atoi(get_attr("x_min", attrs));
+	chan_width->y_min = std::atoi(get_attr("y_min", attrs));
+	chan_width->x_max = std::atoi(get_attr("x_max", attrs));
+	chan_width->y_max = std::atoi(get_attr("y_max", attrs));
 }
-void consume_x_list(AttributeMap& attrs){
-	int index = std::stoi(attrs["index"]);
-	chan_width->x_list[index] = std::stof(attrs["info"]);
+void consume_x_list(const char **attrs){
+	int index = std::atoi(get_attr("index", attrs));
+	chan_width->x_list[index] = std::atof(get_attr("info", attrs));
 }
-void consume_y_list(AttributeMap& attrs){
-	int index = std::stoi(attrs["index"]);
-	chan_width->y_list[index] = std::stof(attrs["info"]);
+void consume_y_list(const char **attrs){
+	int index = std::atoi(get_attr("index", attrs));
+	chan_width->y_list[index] = std::atof(get_attr("info", attrs));
 }
 
 /* Process switch info and push it back to device_ctx.rr_switch_inf[]. When <timing> or <sizing> arrives,
  * the corresponding callback picks up the last item in device_ctx.rr_switch_inf[] and continues to fill it.
  * TODO: Switch types are in a namespace SwitchType but no other thing-type is. Figure out why. */
-void consume_switch(AttributeMap& attrs){
+void consume_switch(const char **attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	t_rr_switch_inf sw = {};
-	if(attrs["name"] != "") sw.name = vtr::strdup(attrs["name"].c_str());
-	std::string type = attrs["type"];
+	const char *name = get_attr_optional("name", attrs);
+	if(name != NULL) sw.name = vtr::strdup(name);
+
+	std::string type = get_attr("type", attrs);
 	if(type == "mux") sw.set_type(SwitchType::MUX);
 	else if(type == "tristate") sw.set_type(SwitchType::TRISTATE);
 	else if(type == "pass_gate") sw.set_type(SwitchType::PASS_GATE);
@@ -416,62 +433,67 @@ void consume_switch(AttributeMap& attrs){
 }
 /* map's operator[] gives default value for nonexistent keys:
  * http://www.cplusplus.com/reference/map/map/operator%5B%5D/ */
-void consume_switch_timing(AttributeMap& attrs){
+void consume_switch_timing(const char **attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	auto& sw = device_ctx.rr_switch_inf.back();
-	if(attrs["R"] != "") sw.R = std::stof(attrs["R"]);
-	if(attrs["Cin"] != "") sw.Cin = std::stof(attrs["Cin"]);
-	if(attrs["Cout"] != "") sw.Cout = std::stof(attrs["Cout"]);
-	if(attrs["Tdel"] != "") sw.Tdel = std::stof(attrs["Tdel"]);
+
+	const char *R = get_attr_optional("R", attrs);
+	if(R != NULL) sw.R = std::atof(R);
+	const char *Cin = get_attr_optional("Cin", attrs);
+	if(Cin != NULL) sw.Cin = std::atof(Cin);
+	const char *Cout = get_attr_optional("Cout", attrs);
+	if(Cout != NULL) sw.Cout = std::atof(Cout);
+	const char *Tdel = get_attr_optional("Tdel", attrs);
+	if(Tdel != NULL) sw.Tdel = std::atof(Tdel);
 }
-void consume_switch_sizing(AttributeMap& attrs){
+void consume_switch_sizing(const char **attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	auto& sw = device_ctx.rr_switch_inf.back();
-	sw.mux_trans_size = std::stof(attrs["mux_trans_size"]);
-	sw.buf_size = std::stof(attrs["buf_size"]);
+	sw.mux_trans_size = std::atof(get_attr("mux_trans_size", attrs));
+	sw.buf_size = std::atof(get_attr("buf_size", attrs));
 }
 
 /* Segments were initialized from the architecture file. Therefore, we don't need
  * to copy segments into memory but we can check them against the arch file.
  * TODO: really do this. This requires some global state and it's not the whole point of the SAX
  * implementation, so skipped for now. */
-void consume_segment(AttributeMap& attrs){
+void consume_segment(const char **attrs){
 }
-void consume_segment_timing(AttributeMap& attrs){
+void consume_segment_timing(const char **attrs){
 }
 
 /* Blocks were initialized from the architecture file. Therefore, we don't need
  * to copy block_types into memory but we can check them against the arch file.
  * TODO: really do this. This requires some global state and it's not the whole point of the SAX
  * implementation, so skipped for now. */
-void consume_block_type(AttributeMap& attrs){
+void consume_block_type(const char **attrs){
 	return;
 }
-void consume_pin_class(AttributeMap& attrs){
+void consume_pin_class(const char **attrs){
 	return;
 }
-void consume_pin(AttributeMap& attrs){
+void consume_pin(const char **attrs){
 	return;
 }
 
 /* Grid was initialized from the architecture file. Therefore, we don't need
  * to copy grid_locs into memory but we can check them against the arch file. */
-void consume_grid_loc(AttributeMap& attrs){
-	int x = std::stoi(attrs["x"]);
-	int y = std::stoi(attrs["y"]);
+void consume_grid_loc(const char **attrs){
+	int x = std::atoi(get_attr("x", attrs));
+	int y = std::atoi(get_attr("y", attrs));
 	const t_grid_tile& grid_tile = (*g_grid)[x][y];
 
-	int block_type_id = std::stoi(attrs["block_type_id"]);
+	int block_type_id = std::atoi(get_attr("block_type_id", attrs));
 	if (grid_tile.type->index != block_type_id) {
 			vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__,
 					"Architecture file does not match RR graph's block_type_id at (%d, %d): arch used ID %d, RR graph used ID %d.", x, y,
 					 (grid_tile.type->index), block_type_id);
 		 }
-		 if (grid_tile.width_offset != std::stof(attrs["width_offset"])) {
+		 if (grid_tile.width_offset != std::atof(get_attr("width_offset", attrs))) {
 			vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__,
 					"Architecture file does not match RR graph's width_offset at (%d, %d)", x, y);
 	}
-		 if (grid_tile.width_offset != std::stof(attrs["height_offset"])) {
+		 if (grid_tile.width_offset !=  std::atof(get_attr("height_offset", attrs))) {
 			vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__,
 					"Architecture file does not match RR graph's height_offset at (%d, %d)", x, y);
 	}
@@ -479,11 +501,11 @@ void consume_grid_loc(AttributeMap& attrs){
 
 /* Process node info and push it back to device_ctx.rr_nodes[]. When <loc> or <timing> arrives,
  * the corresponding callback picks up the last item in device_ctx.rr_nodes[] and continues to fill it. */
-void consume_node(AttributeMap& attrs){
+void consume_node(const char **attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	t_rr_node node;
-	current_node_id = std::stoi(attrs["id"]);
-	std::string type = attrs["type"];
+	current_node_id = std::atoi(get_attr("id", attrs));
+	std::string type = get_attr("type", attrs);
 	if(type == "CHANX"){
 		node.set_type(CHANX);
 	} else if(type == "CHANY"){
@@ -501,7 +523,7 @@ void consume_node(AttributeMap& attrs){
 			"Valid inputs for class types are \"CHANX\", \"CHANY\",\"SOURCE\", \"SINK\",\"OPIN\", and \"IPIN\".");
 	}
 	if(node.type() == CHANX || node.type() == CHANY){
-		std::string dir = attrs["direction"];
+		std::string dir = get_attr("direction", attrs);
 		if(dir == "INC_DIR"){
 			node.set_direction(INC_DIRECTION);
 		} else if(dir == "DEC_DIR"){
@@ -513,22 +535,22 @@ void consume_node(AttributeMap& attrs){
 			node.set_direction(NO_DIRECTION);
 		}
 	}
-	node.set_capacity(std::stoi(attrs["capacity"]));
+	node.set_capacity(std::atoi(get_attr("capacity", attrs)));
 	node.set_num_edges(0);
 	device_ctx.rr_nodes.push_back(std::move(node));
 }
-void consume_node_loc(AttributeMap& attrs){
+void consume_node_loc(const char **attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	auto& node = device_ctx.rr_nodes[current_node_id];
 	short x1, x2, y1, y2;
-	x1 = std::stoi(attrs["xlow"]);
-	y1 = std::stoi(attrs["ylow"]);
-	x2 = std::stoi(attrs["xhigh"]);
-	y2 = std::stoi(attrs["yhigh"]);
+	x1 = std::atoi(get_attr("xlow", attrs));
+	y1 = std::atoi(get_attr("ylow", attrs));
+	x2 = std::atoi(get_attr("xhigh", attrs));
+	y2 = std::atoi(get_attr("yhigh", attrs));
 	node.set_coordinates(x1, y1, x2, y2);
-	node.set_ptc_num(std::stoi(attrs["ptc"]));
+	node.set_ptc_num(std::atoi(get_attr("ptc", attrs)));
 	if(node.type() == IPIN || node.type() == OPIN){
-		std::string side = attrs["side"];
+		std::string side = get_attr("side", attrs);
 		if(side == "LEFT") node.set_side(LEFT);
 		else if(side == "RIGHT") node.set_side(RIGHT);
 		else if(side == "TOP") node.set_side(TOP);
@@ -538,12 +560,14 @@ void consume_node_loc(AttributeMap& attrs){
 		}
 	}
 }
-void consume_node_timing(AttributeMap& attrs){
+void consume_node_timing(const char **attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	auto& node = device_ctx.rr_nodes[current_node_id];
 	float R = 0, C = 0;
-	if(attrs["R"] != "") R = std::stof(attrs["R"]);
-	if(attrs["C"] != "") C = std::stof(attrs["C"]);
+	const char *R_text = get_attr_optional("R", attrs);
+	if(R_text != NULL) R = std::atof(R_text);
+	const char *C_text = get_attr_optional("C", attrs);
+	if(C_text != NULL) C = std::atof(C_text);
 	node.set_rc_index(find_create_rr_rc_data(R, C));
 }
 
@@ -552,36 +576,37 @@ static std::unordered_map<int, int> seg_id_map;
  * segment_ids with nodes. I have no idea why. But we give in and fill a map with
  * segment_ids to know which node ID corresponds to which segment ID. After the
  * whole parsing, segments will be inserted using those IDs. */
-void consume_node_segment(AttributeMap& attrs){
+void consume_node_segment(const char **attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
-	if(attrs["segment_id"] != ""){
-		seg_id_map[current_node_id] = std::stoi(attrs["segment_id"]);
+	const char *segment_id = get_attr_optional("segment_id", attrs);
+	if(segment_id != NULL){
+		seg_id_map[current_node_id] = std::atoi(segment_id);
 	}
 }
 
 /* Since <metadata> involves a child element *and* a text node, this is a bit hard.
  * We set up the current <meta> struct in global state in the start_element handlers(here)
  * and push it in the on_characters handle, where we have the full information. */
-void consume_node_metadata(AttributeMap& attrs){
+void consume_node_metadata(const char **attrs){
 	current_meta_place = NODE;
 }
-void consume_edge_metadata(AttributeMap& attrs){
+void consume_edge_metadata(const char **attrs){
 	current_meta_place = EDGE;
 }
-void consume_meta(AttributeMap& attrs){
-	current_meta_name = attrs["name"];
+void consume_meta(const char **attrs){
+	current_meta_name = get_attr("name", attrs);
 }
 
 /* Add an edge to the source node, save it in global variable current_edge.
  * Also track the most frequently appearing switch that connects a CHANX/CHANY node
  * to a IPIN node. This is done here because there is no easy way to iterate over all edges. */
-void consume_edge(AttributeMap& attrs){
+void consume_edge(const char ** attrs){
 	int source_node_id, sink_node_id, switch_id;
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 
-	current_edge.src_id = source_node_id = std::stoi(attrs["src_node"]);
-	current_edge.sink_id = sink_node_id = std::stoi(attrs["sink_node"]);
-	current_edge.switch_id = switch_id = std::stoi(attrs["switch_id"]);
+	current_edge.src_id = source_node_id = std::atoi(get_attr("src_node", attrs));
+	current_edge.sink_id = sink_node_id = std::atoi(get_attr("sink_node", attrs));
+	current_edge.switch_id = switch_id = std::atoi(get_attr("switch_id", attrs));
 	auto& source_node = device_ctx.rr_nodes[source_node_id];
 	source_node.add_edge(sink_node_id, switch_id);
 
