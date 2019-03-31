@@ -82,15 +82,17 @@ void process_seg_id();
 static std::stack <const char *> parser_stack;
 static xmlSAXHandler sax_handler = {};
 
-/* We need to build the current <meta> node piece by piece here. */
+/* We need to build the current <meta> node piece by piece here. For edge metadata,
+ information about the current edge is also required. */
 static std::string current_meta_name;
 static std::string current_meta_value;
 static enum {NODE, EDGE} current_meta_place;
+static struct {int src_id; int sink_id; int switch_id;} current_edge;
 
-/* Edges create trouble when processed sequentially, so we read all into memory.
- * Note that we are not caching edge metadata, they can be read right into device_ctx. */
-struct cached_edge { int src_node_id; int sink_node_id; int switch_id; };
-static std::vector<cached_edge> cached_edges;
+/* The <edge> handler(consume_node()) tracks the most frequently appearing switch that
+ * connects a CHANX/CHANY node to a IPIN node. It is then assigned to *wire_to_rr_ipin_switch. */
+int *count_for_wire_to_ipin_switches = NULL;
+struct {int id; int count;} most_frequent_switch = {-1, 0};
 
 /* current_node_id is kept because we need to build a map from node IDs to segment IDs
  * and t_rr_node does not hold IDs.
@@ -218,8 +220,11 @@ void load_rr_file(const t_graph_type graph_type,
 	chan_width = &nodes_per_chan;
 	g_grid = &grid;
 
-	/* First clear the previous rr_graph in case this gets called twice. XXX: what else global vars to clear? */
-	cached_edges.clear();
+	/* First clear the previous rr_graph and reset previous global state
+	 *  in case this gets called twice. TODO: what else global vars to clear? */
+	delete [] count_for_wire_to_ipin_switches;
+	count_for_wire_to_ipin_switches = NULL;
+	most_frequent_switch = {-1, 0};
 	device_ctx.rr_nodes.clear();
 	device_ctx.rr_switch_inf.clear();
 
@@ -246,8 +251,9 @@ void load_rr_file(const t_graph_type graph_type,
 	xmlParseChunk(ctx, buffer, 0, 1);
 	xmlFreeParserCtxt(ctx);
 
-	/* Process the cached edges. */
-	process_edges(wire_to_rr_ipin_switch);
+	/* Fill in *wire_to_rr_ipin_switch, free the array allocated for tracking it. */
+	*wire_to_rr_ipin_switch = most_frequent_switch.id;
+	delete [] count_for_wire_to_ipin_switches;
 
 	/* Partition the rr graph edges for efficient access to configurable/non-configurable edge subsets. */
 	partition_rr_graph_edges(device_ctx);
@@ -324,14 +330,12 @@ void on_characters(void *ctx, const xmlChar *_ch, int len){
 	char text[1024];
 	auto top = parser_stack.top();
 	if(strcmp(top, "meta") == 0){
-		auto& device_ctx = g_vpr_ctx.mutable_device();
 		strncpy(text, ch, len);
 		current_meta_value = std::string(text);
 		if(current_meta_place == NODE){
 			vpr::add_rr_node_metadata(current_node_id, current_meta_name, current_meta_value);
 		} else if(current_meta_place == EDGE){
-			auto &edge = cached_edges.back();
-			vpr::add_rr_edge_metadata(edge.src_node_id, edge.sink_node_id, edge.switch_id,
+			vpr::add_rr_edge_metadata(current_edge.src_id, current_edge.sink_id, current_edge.switch_id,
 								current_meta_name, current_meta_value);
 		}
 	}
@@ -420,7 +424,7 @@ void consume_segment_timing(AttributeMap& attrs){
 
 /* Blocks were initialized from the architecture file. Therefore, we don't need
  * to copy block_types into memory but we can check them against the arch file.
- * XXX: really do this. This requires some global state and it's not the whole point of the SAX
+ * TODO: really do this. This requires some global state and it's not the whole point of the SAX
  * implementation, so skipped for now. */
 void consume_block_type(AttributeMap& attrs){
 	return;
@@ -550,58 +554,36 @@ void consume_meta(AttributeMap& attrs){
 	current_meta_name = attrs["name"];
 }
 
-/* Cache the edge for further processing. Note that we do not cache the metadata. */
+/* Add an edge to the source node, save it in global variable current_edge.
+ * Also track the most frequently appearing switch that connects a CHANX/CHANY node
+ * to a IPIN node. This is done here because there is no easy way to iterate over all edges. */
 void consume_edge(AttributeMap& attrs){
-	cached_edge edge;
-	edge.src_node_id = std::stoi(attrs["src_node"]);
-	edge.sink_node_id = std::stoi(attrs["sink_node"]);
-	edge.switch_id = std::stoi(attrs["switch_id"]);
-	cached_edges.push_back(std::move(edge));
-}
-
-/* Process the cached edges. */
-void process_edges(int *wire_to_rr_ipin_switch){
+	int source_node_id, sink_node_id, switch_id;
 	auto& device_ctx = g_vpr_ctx.mutable_device();
-	std::vector<int> num_edges_for_node;
-	num_edges_for_node.resize(device_ctx.rr_nodes.size(), 0);
-	std::fill(num_edges_for_node.begin(), num_edges_for_node.end(), 0);
-	/* first count edges for all nodes and allocate space for edges in them.
-	 * in nodes, edge space is implemented with unique_ptr and it's a pain to "push" into such arrays. */
-	for(auto e : cached_edges){
-		int src_id = e.src_node_id;
-		num_edges_for_node[src_id]++;
-		device_ctx.rr_nodes[src_id].set_num_edges(num_edges_for_node[src_id]); /* TODO: is it sensible to do this? */
+
+	current_edge.src_id = source_node_id = std::stoi(attrs["src_node"]);
+	current_edge.sink_id = sink_node_id = std::stoi(attrs["sink_node"]);
+	current_edge.switch_id = switch_id = std::stoi(attrs["switch_id"]);
+	auto& source_node = device_ctx.rr_nodes[source_node_id];
+	source_node.add_edge(sink_node_id, switch_id);
+
+	auto& sink_node = device_ctx.rr_nodes[sink_node_id];
+	if(count_for_wire_to_ipin_switches == NULL){
+		count_for_wire_to_ipin_switches = new int[device_ctx.rr_switch_inf.size()];
+		std::memset(count_for_wire_to_ipin_switches, 0, device_ctx.rr_switch_inf.size());
 	}
-	/* now reset all counts and place each edge into its own index, incrementing the
-	 * count as we go. this is again an artifact from the unique_ptr. */
-	fill(num_edges_for_node.begin(), num_edges_for_node.end(), 0);
-	for(auto e : cached_edges){
-		int src_id = e.src_node_id;
-		device_ctx.rr_nodes[src_id].set_edge_sink_node(num_edges_for_node[src_id], e.sink_node_id);
-		device_ctx.rr_nodes[src_id].set_edge_switch(num_edges_for_node[src_id], e.switch_id);
-		num_edges_for_node[src_id]++;
-	}
-	/* finally get and store the most frequent switch that connects a CHANX/CHANY node to an IPIN node. */
-	std::vector<int> count_for_wire_to_ipin_switches;
-	count_for_wire_to_ipin_switches.resize(device_ctx.rr_switch_inf.size(), 0);
-	struct {int id; int count;} most_frequent_switch = {-1, 0};
-	for(auto e: cached_edges){
-		auto& source_node = device_ctx.rr_nodes[e.src_node_id];
-		auto& sink_node = device_ctx.rr_nodes[e.sink_node_id];
-		if((source_node.type() == CHANX || source_node.type() == CHANY) && sink_node.type() == IPIN){
-			int count = count_for_wire_to_ipin_switches[e.switch_id] + 1;
-			if(count > most_frequent_switch.count){
-				most_frequent_switch.id = e.switch_id;
-				most_frequent_switch.count = count;
-			}
-			count_for_wire_to_ipin_switches[e.switch_id] = count;
+	if((source_node.type() == CHANX || source_node.type() == CHANY) && sink_node.type() == IPIN){
+		int count = count_for_wire_to_ipin_switches[switch_id] + 1;
+		if(count > most_frequent_switch.count){
+			most_frequent_switch.id = switch_id;
+			most_frequent_switch.count = count;
 		}
+		count_for_wire_to_ipin_switches[switch_id] = count;
 	}
-	*wire_to_rr_ipin_switch = most_frequent_switch.id;
 }
 
-/*Allocate and load the rr_node look up table. SINK and SOURCE, IPIN and OPIN
- *share the same look up table. CHANX and CHANY have individual look ups */
+/* Allocate and load the rr_node look up table. SINK and SOURCE, IPIN and OPIN
+ * share the same look up table. CHANX and CHANY have individual look ups */
 void process_rr_node_indices(const DeviceGrid& grid) {
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 
