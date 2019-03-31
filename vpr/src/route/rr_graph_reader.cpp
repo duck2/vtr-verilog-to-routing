@@ -79,7 +79,7 @@ void set_cost_indices(bool is_global_graph, const int num_seg_types);
 void process_seg_id();
 
 /********************* Global variables for this module *******************/
-static std::stack <const char *> parser_stack;
+/* libxml2 interface */
 static xmlSAXHandler sax_handler = {};
 
 /* We need to build the current <meta> node piece by piece here. For edge metadata,
@@ -99,104 +99,113 @@ struct {int id; int count;} most_frequent_switch = {-1, 0};
  * !! Also note that it's assumed that nodes appear in ID order and no ID gaps occur. */
 static int current_node_id;
 
-/* hoist pointers to arguments to load_rr_file: we need to access them from SAX handlers */
+/* Pointers to arguments to load_rr_file: we need to access them from SAX handlers. */
 static t_chan_width *chan_width;
 static const DeviceGrid *g_grid;
 
-/*
-enum {
-	T_RR_GRAPH = 0,
-	T_CHANNELS = 1,
-	T_SWITCHES = 2,
-	T_SEGMENTS = 3,
-	T_BLOCK_TYPES = 4,
-	T_GRID = 5,
-	T_RR_NODES = 6,
-	T_RR_EDGES = 7,
-	T_CHANNEL = 8,
-	T_X_LIST = 9,
-	T_Y_LIST = 10,
-	T_SWITCH = 11,
-	T_TIMING = 12,
-	T_SIZING = 13,
-	T_SEGMENT = 14,
-	T_BLOCK_TYPE = 15,
-	T_PIN_CLASS = 16,
-	T_PIN = 17,
-	T_GRID_LOC = 18,
-	T_NODE = 19,
-	T_EDGE = 20,
-	T_METADATA = 21,
-	T_META = 22
-} tag_type;
+/* Map tag names to ints. This helps us build a lookup table instead of a hashmap,
+ * and it also enables us to use an array of ints instead of a std::stack of std::strings as the parser stack. */
+enum tag_type : int {
+	T_RR_GRAPH = 1,
+	T_CHANNELS,
+	T_SWITCHES,
+	T_SEGMENTS,
+	T_BLOCK_TYPES,
+	T_GRID,
+	T_RR_NODES,
+	T_RR_EDGES,
+	T_CHANNEL,
+	T_X_LIST,
+	T_Y_LIST,
+	T_SWITCH,
+	T_TIMING,
+	T_SIZING,
+	T_SEGMENT,
+	T_BLOCK_TYPE,
+	T_PIN_CLASS,
+	T_PIN,
+	T_GRID_LOC,
+	T_NODE,
+	T_EDGE,
+	T_METADATA,
+	T_META,
+	T_LOC,
+};
 static std::unordered_map<std::string, tag_type> tag_map = {
 	{"rr_graph", T_RR_GRAPH},
 	{"channels", T_CHANNELS},
 	{"switches", T_SWITCHES},
-	{"segments", T_
-}
-*/
-
-/* A mapping from the previous tag and current tag to the function to call. */
-static std::unordered_map<std::string, std::unordered_map<std::string, void(*)(AttributeMap&)>> parse_table = {
-		{"rr_graph", {
-			{"channels", consume_channels},
-			{"switches", consume_switches},
-			{"segments", consume_segments},
-			{"block_types", consume_block_types},
-			{"grid", consume_grid},
-			{"rr_nodes", consume_rr_nodes},
-			{"rr_edges", consume_rr_edges}
-		}},
-		{"channels", {
-			{"channel", consume_channel},
-			{"x_list", consume_x_list},
-			{"y_list", consume_y_list},
-		}},
-		{"switches", {
-			{"switch", consume_switch},
-		}},
-		{"switch", {
-			{"timing", consume_switch_timing},
-			{"sizing", consume_switch_sizing},
-		}},
-		{"segments", {
-			{"segment", consume_segment},
-		}},
-		{"segment", {
-			{"timing", consume_segment_timing},
-		}},
-		{"block_types", {
-			{"block_type", consume_block_type},
-		}},
-		{"block_type", {
-			{"pin_class", consume_pin_class},
-		}},
-		{"pin_class", {
-			{"pin", consume_pin},
-		}},
-		{"grid", {
-			{"grid_loc", consume_grid_loc},
-		}},
-		{"rr_nodes", {
-			{"node", consume_node},
-		}},
-		{"rr_edges", {
-			{"edge", consume_edge},
-		}},
-		{"node", {
-			{"loc", consume_node_loc},
-			{"timing", consume_node_timing},
-			{"segment", consume_node_segment},
-			{"metadata", consume_node_metadata},
-		}},
-		{"edge", {
-			{"metadata", consume_edge_metadata},
-		}},
-		{"metadata", {
-			{"meta", consume_meta},
-		}},
+	{"segments", T_SEGMENTS},
+	{"block_types", T_BLOCK_TYPES},
+	{"grid", T_GRID},
+	{"rr_nodes", T_RR_NODES},
+	{"rr_edges", T_RR_EDGES},
+	{"channel", T_CHANNEL},
+	{"x_list", T_X_LIST},
+	{"y_list", T_Y_LIST},
+	{"switch", T_SWITCH},
+	{"timing", T_TIMING},
+	{"sizing", T_SIZING},
+	{"segment", T_SEGMENT},
+	{"block_type", T_BLOCK_TYPE},
+	{"pin_class", T_PIN_CLASS},
+	{"pin", T_PIN},
+	{"grid_loc", T_GRID_LOC},
+	{"node", T_NODE},
+	{"edge", T_EDGE},
+	{"metadata", T_METADATA},
+	{"meta", T_META},
+	{"loc", T_LOC},
 };
+
+/* The parser stack to keep the current path of tags.
+ * It can have a static size, because there is no recursive nesting in the file format. */
+static tag_type parser_stack[64];
+static int parser_stack_top = -1;
+
+/* The lookup table. It maps the previous tag and current tag to the handler function.
+ * It is initialized using a class because C++ doesn't like array initialization using enums. */
+class ParseTableClass {
+public:
+	ParseTableClass(){
+		table[T_RR_GRAPH][T_CHANNELS] = consume_channels;
+		table[T_RR_GRAPH][T_SWITCHES] = consume_switches;
+		table[T_RR_GRAPH][T_SEGMENTS] = consume_segments;
+		table[T_RR_GRAPH][T_BLOCK_TYPES] = consume_block_types;
+		table[T_RR_GRAPH][T_GRID] = consume_grid;
+		table[T_RR_GRAPH][T_RR_NODES] = consume_rr_nodes;
+		table[T_RR_GRAPH][T_RR_EDGES] = consume_rr_edges;
+		table[T_CHANNELS][T_CHANNEL] = consume_channel;
+		table[T_CHANNELS][T_X_LIST] = consume_x_list;
+		table[T_CHANNELS][T_Y_LIST] = consume_y_list;
+		table[T_SWITCHES][T_SWITCH] = consume_switch;
+		table[T_SWITCH][T_TIMING] = consume_switch_timing;
+		table[T_SWITCH][T_SIZING] = consume_switch_sizing;
+		table[T_SEGMENTS][T_SEGMENT] = consume_segment;
+		table[T_SEGMENT][T_TIMING] = consume_segment_timing;
+		table[T_BLOCK_TYPES][T_BLOCK_TYPE] = consume_block_type;
+		table[T_BLOCK_TYPE][T_PIN_CLASS] = consume_pin_class;
+		table[T_PIN_CLASS][T_PIN] = consume_pin;
+		table[T_GRID][T_GRID_LOC] = consume_grid_loc;
+		table[T_RR_NODES][T_NODE] = consume_node;
+		table[T_RR_EDGES][T_EDGE] = consume_edge;
+		table[T_NODE][T_LOC] = consume_node_loc;
+		table[T_NODE][T_TIMING] = consume_node_timing;
+		table[T_NODE][T_SEGMENT] = consume_node_segment;
+		table[T_NODE][T_METADATA] = consume_node_metadata;
+		table[T_EDGE][T_METADATA] = consume_edge_metadata;
+		table[T_METADATA][T_META] = consume_meta;
+	}
+	/* This works because the first [] is handled by this function,
+	 * returning an array of function pointers, which can be then regularly
+	 * accessed with the second []. */
+	void(**operator[](size_t index))(AttributeMap&) const {
+		return table[index];
+	}
+private:
+	void(*table[32][32])(AttributeMap&);
+};
+static ParseTableClass parse_table;
 
 /*loads the given RR_graph file into the appropriate data structures
  * as specified by read_rr_graph_name. Set up correct routing data
@@ -279,15 +288,22 @@ void load_rr_file(const t_graph_type graph_type,
 void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs){
 	const char *name = (const char *)_name;
 	const char **attrs = (const char **)_attrs;
+
+	tag_type current_tag = tag_map[name];
+	if(current_tag == 0)
+		vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__, "Unrecognized tag <%s>.", name);
+
 	/* Convert attributes to hashtable first. */
 	AttributeMap attr_map;
 	for(const char **c = attrs; c && *c; c += 2){
 		attr_map[*c] = *(c+1);
 	}
 
-	if(parser_stack.empty()){
+	/* Handle the first tag. */
+	if(parser_stack_top == -1){
 		if(strcmp(name, "rr_graph") == 0){
-			parser_stack.push("rr_graph");
+			parser_stack[0] = T_RR_GRAPH;
+			parser_stack_top = 0;
 			if(attr_map["tool_version"] != "" && attr_map["tool_version"] != vtr::VERSION){
 				VTR_LOG("\n");
 				VTR_LOG_WARN("This architecture version is for VPR %s while your current VPR version is %s, compatibility issues may arise.\n", attr_map["tool_version"].c_str(), vtr::VERSION);
@@ -305,31 +321,33 @@ void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs){
 		return;
 	}
 
-	auto top = parser_stack.top();
-	parser_stack.push(name);
+	auto prev_tag = parser_stack[parser_stack_top];
+	parser_stack_top++;
+	parser_stack[parser_stack_top] = current_tag;
 
 	/* Look up callback function from current and previous tags. */
-	auto fn = parse_table[top][name];
+	auto fn = parse_table[prev_tag][current_tag];
 	if(fn != NULL){
 		(*fn)(attr_map);
 		return;
 	}
-	vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__, "Unexpected node <%s> in <%s>.", name, top);
+	/* TODO: Maybe implement reverse enum lookup for this. */
+	vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__, "Unexpected node <%d> in <%d>.", current_tag, prev_tag);
 	return;
 }
 
 void on_end_element(void *ctx, const xmlChar *name){
-	parser_stack.pop();
+	parser_stack_top--;
 }
 
 /* Complete adding metadata. What we get here is the value of the <meta> node. Only by
  * the time we get it, we know all the required information to make a new meta struct, so it's handled here. */
 void on_characters(void *ctx, const xmlChar *_ch, int len){
-	if(parser_stack.empty()) return;
+	if(parser_stack_top == -1) return;
 	const char *ch = (const char *)_ch;
 	char text[1024];
-	auto top = parser_stack.top();
-	if(strcmp(top, "meta") == 0){
+	auto top = parser_stack[parser_stack_top];
+	if(top == T_META){
 		strncpy(text, ch, len);
 		current_meta_value = std::string(text);
 		if(current_meta_place == NODE){
@@ -501,7 +519,7 @@ void consume_node(AttributeMap& attrs){
 }
 void consume_node_loc(AttributeMap& attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
-	auto& node = device_ctx.rr_nodes.back();
+	auto& node = device_ctx.rr_nodes[current_node_id];
 	short x1, x2, y1, y2;
 	x1 = std::stoi(attrs["xlow"]);
 	y1 = std::stoi(attrs["ylow"]);
@@ -522,7 +540,7 @@ void consume_node_loc(AttributeMap& attrs){
 }
 void consume_node_timing(AttributeMap& attrs){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
-	auto& node = device_ctx.rr_nodes.back();
+	auto& node = device_ctx.rr_nodes[current_node_id];
 	float R = 0, C = 0;
 	if(attrs["R"] != "") R = std::stof(attrs["R"]);
 	if(attrs["C"] != "") C = std::stof(attrs["C"]);
