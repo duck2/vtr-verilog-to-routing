@@ -1,0 +1,49 @@
+enum attr_type: int {
+	T_ID, T_NAME, T_TYPE, T_R, T_CIN, T_COUT, T_TDEL, T_MUX_TRANS_SIZE,
+	T_BUF_SIZE, T_R_PER_METER, T_C_PER_METER, T_WIDTH, T_HEIGHT, T_PTC, T_X, T_Y,
+	T_BLOCK_TYPE_ID, T_WIDTH_OFFSET, T_HEIGHT_OFFSET, T_DIRECTION,
+	T_CAPACITY, T_XLOW, T_YLOW, T_XHIGH, T_SIDE, T_C, T_SEGMENT_ID,
+	T_SRC_NODE, T_SINK_NODE, T_SWITCH_ID
+};
+struct t_attr_lookup {const char *name; enum attr_type value;};
+%%
+id, T_ID
+name, T_NAME
+type, T_TYPE
+R, T_R
+Cin, T_CIN
+Cout, T_COUT
+Tdel, T_TDEL
+mux_trans_size, T_MUX_TRANS_SIZE
+buf_size, T_BUF_SIZE
+R_per_meter, T_R_PER_METER
+C_per_meter, T_C_PER_METER
+width, T_WIDTH
+height, T_HEIGHT
+ptc, T_PTC
+x, T_X
+y, T_Y
+block_type_id, T_BLOCK_TYPE_ID
+width_offset, T_WIDTH_OFFSET
+height_offset, T_HEIGHT_OFFSET
+direction, T_DIRECTION
+capacity, T_CAPACITY
+xlow, T_XLOW
+ylow, T_YLOW
+xhigh, T_XHIGH
+yhigh, T_YHIGH
+side, T_SIDE
+C, T_C
+segment_id, T_SEGMENT_ID,
+src_node, T_SRC_NODE,
+sink_node, T_SINK_NODE
+switch_id, T_SWITCH_ID
+chan_width_max, T_CHAN_WIDTH_MAX
+x_min, T_X_MIN
+y_min, T_Y_MIN
+x_max, T_X_MAX
+y_max, T_Y_MAX
+index, T_INDEX
+info, T_INFO
+tool_version, T_TOOL_VERSION
+tool_comment, T_TOOL_COMMENT

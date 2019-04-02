@@ -1,0 +1,33 @@
+enum tag_type : int {
+	T_RR_GRAPH, T_CHANNELS, T_SWITCHES, T_SEGMENTS,
+	T_BLOCK_TYPES, T_GRID, T_RR_NODES, T_RR_EDGES, T_CHANNEL,
+	T_X_LIST, T_Y_LIST, T_SWITCH, T_TIMING, T_SIZING, T_SEGMENT,
+	T_BLOCK_TYPE, T_PIN_CLASS, T_PIN, T_GRID_LOC, T_NODE,
+	T_EDGE, T_METADATA, T_META, T_LOC,
+};
+struct t_tag_lookup {char *name; enum tag_type value;};
+%%
+rr_graph, T_RR_GRAPH
+channels, T_CHANNELS
+switches, T_SWITCHES
+segments, T_SEGMENTS
+block_types, T_BLOCK_TYPES
+grid, T_GRID
+rr_nodes, T_RR_NODES
+rr_edges, T_RR_EDGES
+channel, T_CHANNEL
+x_list, T_X_LIST
+y_list, T_Y_LIST
+switch, T_SWITCH
+timing, T_TIMING
+sizing, T_SIZING
+segment, T_SEGMENT
+block_type, T_BLOCK_TYPE
+pin_class, T_PIN_CLASS
+pin, T_PIN
+grid_loc, T_GRID_LOC
+node, T_NODE
+edge, T_EDGE
+metadata, T_METADATA
+meta, T_META
+loc, T_LOC

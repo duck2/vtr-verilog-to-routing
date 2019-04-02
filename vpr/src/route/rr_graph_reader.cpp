@@ -1,3 +1,18 @@
+/*This function loads in a routing resource graph written in xml format
+ * into vpr when the option --read_rr_graph <file name> is specified.
+ * When it is not specified the build_rr_graph function is then called.
+ * This is done using the libxml2 library. This is useful
+ * when specific routing resources should remain constant or when
+ * some information left out in the architecture can be specified
+ * in the routing resource graph. The routing resource graph file is
+ * contained in a <rr_graph> tag. Its subtags describe the rr graph's
+ * various features such as nodes, edges, and segments. Information such
+ * as blocks, grids, and segments are verified with the architecture
+ * to ensure it matches. An error will be thrown if any feature does not match.
+ * Other elements such as edges, nodes, and switches
+ * are overwritten by the rr graph file if one is specified. If an optional
+ * identifier such as capacitance is not specified, it is set to 0. */
+
 #include <algorithm>
 #include <cstring>
 #include <ctime>
@@ -39,39 +54,38 @@
 
 /********************* Subroutines local to this module *******************/
 void load_rr_file(const char *name);
-const char *get_attr(const char *name, const char **attrs);
-const char *get_attr_optional(const char *name, const char **attrs);
+
 void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs);
 void on_end_element(void *ctx, const xmlChar *name);
 void on_characters(void *ctx, const xmlChar *ch, int len);
 
-void consume_channels(const char ** attrs);
-void consume_switches(const char ** attrs);
-void consume_segments(const char ** attrs);
-void consume_block_types(const char ** attrs);
-void consume_grid(const char ** attrs);
-void consume_rr_nodes(const char ** attrs);
-void consume_rr_edges(const char ** attrs);
-void consume_channel(const char ** attrs);
-void consume_x_list(const char ** attrs);
-void consume_y_list(const char ** attrs);
-void consume_switch(const char ** attrs);
-void consume_switch_timing(const char ** attrs);
-void consume_switch_sizing(const char ** attrs);
-void consume_segment(const char ** attrs);
-void consume_segment_timing(const char ** attrs);
-void consume_block_type(const char ** attrs);
-void consume_pin_class(const char ** attrs);
-void consume_pin(const char ** attrs);
-void consume_grid_loc(const char ** attrs);
-void consume_node(const char ** attrs);
-void consume_node_loc(const char ** attrs);
-void consume_node_timing(const char ** attrs);
-void consume_node_segment(const char ** attrs);
-void consume_node_metadata(const char ** attrs);
-void consume_meta(const char ** attrs);
-void consume_edge(const char ** attrs);
-void consume_edge_metadata(const char ** attrs);
+void consume_channels(void);
+void consume_switches(void);
+void consume_segments(void);
+void consume_block_types(void);
+void consume_grid(void);
+void consume_rr_nodes(void);
+void consume_rr_edges(void);
+void consume_channel(void);
+void consume_x_list(void);
+void consume_y_list(void);
+void consume_switch(void);
+void consume_switch_timing(void);
+void consume_switch_sizing(void);
+void consume_segment(void);
+void consume_segment_timing(void);
+void consume_block_type(void);
+void consume_pin_class(void);
+void consume_pin(void);
+void consume_grid_loc(void);
+void consume_node(void);
+void consume_node_loc(void);
+void consume_node_timing(void);
+void consume_node_segment(void);
+void consume_node_metadata(void);
+void consume_meta(void);
+void consume_edge(void);
+void consume_edge_metadata(void);
 
 void process_edges(int *wire_to_rr_ipin_switch);
 void process_rr_node_indices(const DeviceGrid& grid);
@@ -85,7 +99,6 @@ static xmlSAXHandler sax_handler = {};
 /* We need to build the current <meta> node piece by piece here. For edge metadata,
  information about the current edge is also required. */
 static std::string current_meta_name;
-static std::string current_meta_value;
 static enum {NODE, EDGE} current_meta_place;
 static struct {int src_id; int sink_id; int switch_id;} current_edge;
 
@@ -103,60 +116,129 @@ static int current_node_id;
 static t_chan_width *chan_width;
 static const DeviceGrid *g_grid;
 
-/* Map tag names to ints. This helps us build a lookup table instead of a hashmap,
+/* Map tag names to ints. This helps us build a lookup table of function pointers instead of a hashmap,
  * and it also enables us to use an array of ints instead of a std::stack of std::strings as the parser stack. */
 enum tag_type : int {
-	T_RR_GRAPH = 1,
-	T_CHANNELS,
-	T_SWITCHES,
-	T_SEGMENTS,
-	T_BLOCK_TYPES,
-	T_GRID,
-	T_RR_NODES,
-	T_RR_EDGES,
-	T_CHANNEL,
-	T_X_LIST,
-	T_Y_LIST,
-	T_SWITCH,
-	T_TIMING,
-	T_SIZING,
-	T_SEGMENT,
-	T_BLOCK_TYPE,
-	T_PIN_CLASS,
-	T_PIN,
-	T_GRID_LOC,
-	T_NODE,
-	T_EDGE,
-	T_METADATA,
-	T_META,
-	T_LOC,
+	T_RR_GRAPH = 0, T_CHANNELS, T_SWITCHES, T_SEGMENTS,
+	T_BLOCK_TYPES, T_GRID, T_RR_NODES, T_RR_EDGES, T_CHANNEL,
+	T_X_LIST, T_Y_LIST, T_SWITCH, T_TIMING, T_SIZING, T_SEGMENT,
+	T_BLOCK_TYPE, T_PIN_CLASS, T_PIN, T_GRID_LOC, T_NODE,
+	T_EDGE, T_METADATA, T_META, T_LOC,
 };
-static std::unordered_map<std::string, tag_type> tag_map = {
-	{"rr_graph", T_RR_GRAPH},
-	{"channels", T_CHANNELS},
-	{"switches", T_SWITCHES},
-	{"segments", T_SEGMENTS},
-	{"block_types", T_BLOCK_TYPES},
-	{"grid", T_GRID},
-	{"rr_nodes", T_RR_NODES},
+enum { NUM_TAG_TYPES = 24 };
+
+/* To look up the tag type from the tag name, a perfect hash function from gperf is used.
+ * To generate a new one, update tag_gperf_input.txt in this directory and
+ * run the command `gperf -t --enum tag_gperf_input.txt`.
+ *
+ * Note that the code from gperf is reformatted, the wordlist is taken outside as a global variable,
+ * prefixed to not clash with attribute lookup, and the lookup function is changed to take just the
+ * const char * and return a tag_type. Furthermore, the length check is removed, since most of the
+ * incoming strings are known and an unknown string would be recognized in the strcmp check anyway.
+ * In case of regeneration, it might be easier to keep the lookup function. */
+struct t_tag_lookup {const char *name; tag_type value;};
+static t_tag_lookup tag_wordlist[] = {
+	{""}, {""}, {""},
+	{"pin", T_PIN},
+	{"edge", T_EDGE},
+	{""},
+	{"loc", T_LOC},
+	{""},
 	{"rr_edges", T_RR_EDGES},
-	{"channel", T_CHANNEL},
-	{"x_list", T_X_LIST},
-	{"y_list", T_Y_LIST},
+	{"pin_class", T_PIN_CLASS},
+	{""},
 	{"switch", T_SWITCH},
+	{""},
+	{"switches", T_SWITCHES},
+	{"node", T_NODE},
+	{""},
 	{"timing", T_TIMING},
+	{""},
+	{"rr_nodes", T_RR_NODES},
+	{""}, {""},
 	{"sizing", T_SIZING},
 	{"segment", T_SEGMENT},
+	{"segments", T_SEGMENTS},
+	{""}, {""},
+	{"y_list", T_Y_LIST},
+	{""},
+	{"rr_graph", T_RR_GRAPH},
+	{"grid", T_GRID},
 	{"block_type", T_BLOCK_TYPE},
-	{"pin_class", T_PIN_CLASS},
-	{"pin", T_PIN},
+	{"block_types", T_BLOCK_TYPES},
+	{""},
 	{"grid_loc", T_GRID_LOC},
-	{"node", T_NODE},
-	{"edge", T_EDGE},
-	{"metadata", T_METADATA},
+	{""}, {""},
+	{"x_list", T_X_LIST},
+	{"channel", T_CHANNEL},
+	{"channels", T_CHANNELS},
 	{"meta", T_META},
-	{"loc", T_LOC},
+	{""}, {""}, {""},
+	{"metadata", T_METADATA}
 };
+
+static unsigned char tag_asso_values[] = {
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 0, 44, 25, 0, 20,
+	 5, 0, 44, 20, 44, 10, 44, 44, 3, 10,
+	10, 44, 0, 44, 0, 5, 0, 44, 44, 44,
+	20, 10, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+	44, 44, 44, 44, 44, 44
+};
+
+static inline unsigned int tag_hash(const char *str, size_t len){
+	unsigned int hval = len;
+	switch (hval){
+	default:
+		hval += tag_asso_values[(unsigned char)str[3]];
+	/*FALLTHROUGH*/
+	case 3:
+	case 2:
+	case 1:
+		hval += tag_asso_values[(unsigned char)str[0]];
+		break;
+	}
+	return hval;
+}
+
+static inline tag_type lookup_tag(const char *str){
+	enum {
+		TOTAL_KEYWORDS = 24,
+		MIN_WORD_LENGTH = 3,
+		MAX_WORD_LENGTH = 11,
+		MIN_HASH_VALUE = 3,
+		MAX_HASH_VALUE = 43
+	};
+	int len = std::strlen(str);
+	unsigned int key = tag_hash(str, len);
+	if (key <= MAX_HASH_VALUE){
+		const char *s = tag_wordlist[key].name;
+		if(strcmp(str, s) == 0)
+			return tag_wordlist[key].value;
+	}
+	vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__, "Unrecognized tag <%s>.", str);
+}
+/* End of gperf code. */
 
 /* The parser stack to keep the current path of tags.
  * It can have a static size, because there is no recursive nesting in the file format. */
@@ -199,13 +281,164 @@ public:
 	/* This works because the first [] is handled by this function,
 	 * returning an array of function pointers, which can be then regularly
 	 * accessed with the second []. */
-	void(**operator[](size_t index))(const char **) const {
+	void(**operator[](size_t index))(void) const {
 		return table[index];
 	}
 private:
-	void(*table[32][32])(const char **);
+	void(*table[NUM_TAG_TYPES][NUM_TAG_TYPES])(void);
 };
 static ParseTableClass parse_table;
+
+/* Attribute lookup is a major source of slowness. We cannot leave it to linear search.
+ * However, a std::map of std::strings is too slow for this due to the dynamic allocation.
+ *
+ * We know that there is an allowed list of attribute names. So, a perfect hash function is again
+ * usable. We use it to get lookup table indices from strings while filling in on_start_element.
+ * We can then fill a lookup table just like the function lookup. This enables consume_X functions to
+ * address the lookup table with, for example, attr_table[T_WIDTH] instead of searching an array
+ * of strings with strcmp.
+ * If an unknown attribute is found, its value is written to attr_table[T_UNKNOWN].
+ *
+ * The gperf code is generated just like the one above, with attr_gperf_input.txt. */
+enum attr_type: int {
+	T_ID, T_NAME, T_TYPE, T_R, T_CIN, T_COUT, T_TDEL, T_MUX_TRANS_SIZE,
+	T_BUF_SIZE, T_R_PER_METER, T_C_PER_METER, T_WIDTH, T_HEIGHT, T_PTC, T_X, T_Y,
+	T_BLOCK_TYPE_ID, T_WIDTH_OFFSET, T_HEIGHT_OFFSET, T_DIRECTION,
+	T_CAPACITY, T_XLOW, T_YLOW, T_XHIGH, T_YHIGH, T_SIDE, T_C, T_SEGMENT_ID,
+	T_SRC_NODE, T_SINK_NODE, T_SWITCH_ID, T_CHAN_WIDTH_MAX, T_X_MIN,
+	T_Y_MIN, T_X_MAX, T_Y_MAX, T_INFO, T_INDEX, T_TOOL_VERSION, T_TOOL_COMMENT,
+	T_UNKNOWN
+};
+enum { NUM_ATTR_TYPES = 41 };
+static const char *attr_table[NUM_ATTR_TYPES];
+
+struct t_attr_lookup {const char *name; enum attr_type value;};
+static t_attr_lookup attr_wordlist[] = {
+	{""},
+	{"y", T_Y},
+	{""}, {""},
+	{"type", T_TYPE},
+	{""}, {""}, {""},
+	{"buf_size", T_BUF_SIZE},
+	{"Tdel", T_TDEL},
+	{"y_max", T_Y_MAX},
+	{"x", T_X},
+	{"tool_comment", T_TOOL_COMMENT},
+	{"ptc", T_PTC},
+	{"ylow", T_YLOW},
+	{"x_max", T_X_MAX},
+	{""}, {""},
+	{"capacity", T_CAPACITY},
+	{"xlow", T_XLOW},
+	{"yhigh", T_YHIGH},
+	{"height", T_HEIGHT},
+	{"width_offset", T_WIDTH_OFFSET},
+	{"block_type_id", T_BLOCK_TYPE_ID},
+	{"Cout", T_COUT},
+	{"xhigh", T_XHIGH},
+	{""}, {""},
+	{"height_offset", T_HEIGHT_OFFSET},
+	{"chan_width_max", T_CHAN_WIDTH_MAX},
+	{"width", T_WIDTH},
+	{"R", T_R},
+	{""}, {""},
+	{"name", T_NAME},
+	{"y_min", T_Y_MIN},
+	{""}, {""}, {""},
+	{"side", T_SIDE},
+	{"x_min", T_X_MIN},
+	{"C", T_C},
+	{"tool_version", T_TOOL_VERSION},
+	{"src_node", T_SRC_NODE,},
+	{"sink_node", T_SINK_NODE},
+	{"index", T_INDEX},
+	{"R_per_meter", T_R_PER_METER},
+	{"id", T_ID},
+	{""},
+	{"direction", T_DIRECTION},
+	{""},
+	{"C_per_meter", T_C_PER_METER},
+	{""},
+	{"Cin", T_CIN},
+	{"switch_id", T_SWITCH_ID},
+	{"segment_id", T_SEGMENT_ID,},
+	{""}, {""}, {""},
+	{"info", T_INFO},
+	{""}, {""}, {""}, {""},
+	{"mux_trans_size", T_MUX_TRANS_SIZE}
+};
+
+static unsigned char attr_asso_values[] = {
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 20, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 15, 65,	5, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 0, 10,
+	10, 0, 65, 65, 15, 35, 65, 65, 0, 50,
+	30, 20, 0, 65, 20, 35,	0, 65, 65, 10,
+	 5, 0, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+	65, 65, 65, 65, 65, 65
+};
+
+static inline unsigned int attr_hash(const char *str, size_t len){
+	return len + attr_asso_values[(unsigned char)str[len - 1]] + attr_asso_values[(unsigned char)str[0]];
+}
+
+static inline attr_type lookup_attr_type(const char *str){
+	enum {
+		TOTAL_KEYWORDS = 40,
+		MIN_WORD_LENGTH = 1,
+		MAX_WORD_LENGTH = 14,
+		MIN_HASH_VALUE = 1,
+		MAX_HASH_VALUE = 64
+	};
+	int len = std::strlen(str);
+	unsigned int key = attr_hash(str, len);
+	if (key <= MAX_HASH_VALUE){
+		auto k = &(attr_wordlist[key]);
+		const char *s = k->name;
+		if(strcmp (str, s) == 0)
+			return k->value;
+	}
+	/* TODO: Maybe print a warning on unknown attributes? */
+	return T_UNKNOWN;
+}
+/* End of gperf code. */
+
+void mk_attr_table(const char **attrs){
+	memset(attr_table, 0, NUM_ATTR_TYPES*sizeof(const char *));
+	for(const char **c = attrs; c && *c; c += 2){
+		attr_table[lookup_attr_type(*c)] = *(c+1);
+	}
+}
+/* Grab an attribute from the attribute map. Throw if not found. */
+static inline const char *get_attr(enum attr_type T){
+	const char *q = attr_table[T];
+	/* TODO: Add attr_type to attr string lookup table for errors? */
+	if(!q) vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__, "Required attribute %d not present.", T);
+	return q;
+}
+/* Grab an attribute from the array of attributes. Return NULL if not found. */
+static inline const char *get_attr_optional(enum attr_type T){
+	return attr_table[T];
+}
 
 /*loads the given RR_graph file into the appropriate data structures
  * as specified by read_rr_graph_name. Set up correct routing data
@@ -283,39 +516,21 @@ void load_rr_file(const t_graph_type graph_type,
 	}
 	check_rr_graph(graph_type, grid, device_ctx.block_types);
 }
-
-/* Grab an attribute from the array of attributes. Throw if not found. */
-const char *get_attr(const char *name, const char **attrs){
-	for(const char **c = attrs; c && *c; c += 2){
-		if(strcmp(*c, name) == 0) return *(c+1);
-	}
-	/* TODO: Give line or tag information here? */
-	vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__, "Required attribute %s not present.", name);
-}
-
-/* Grab an attribute from the array of attributes. Return NULL if not found. */
-const char *get_attr_optional(const char *name, const char **attrs){
-	for(const char **c = attrs; c && *c; c += 2){
-		if(strcmp(*c, name) == 0) return *(c+1);
-	}
-	return NULL;
-}
-
 /* Handle a new element's start, like <node capacity=...> */
 void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs){
 	const char *name = (const char *)_name;
 	const char **attrs = (const char **)_attrs;
 
-	tag_type current_tag = tag_map[name];
-	if(current_tag == 0)
-		vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__, "Unrecognized tag <%s>.", name);
+	tag_type current_tag = lookup_tag(name);
+	/* Prepare the attribute lookup table. */
+	mk_attr_table(attrs);
 
 	/* Handle the first tag. */
 	if(parser_stack_top == -1){
 		if(strcmp(name, "rr_graph") == 0){
 			parser_stack[0] = T_RR_GRAPH;
 			parser_stack_top = 0;
-			const char *tool_version = get_attr_optional("tool_version", attrs);
+			const char *tool_version = get_attr_optional(T_TOOL_VERSION);
 			if(tool_version != NULL && std::strcmp(tool_version, vtr::VERSION) != 0){
 				VTR_LOG("\n");
 				VTR_LOG_WARN("This architecture version is for VPR %s while your current VPR version is %s, compatibility issues may arise.\n", tool_version, vtr::VERSION);
@@ -323,7 +538,7 @@ void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs){
 			}
 
 			std::string correct_string = "Generated from arch file " + std::string(get_arch_file_name());
-			const char *tool_comment = get_attr_optional("tool_comment", attrs);
+			const char *tool_comment = get_attr_optional(T_TOOL_COMMENT);
 			if(tool_comment != NULL && correct_string != tool_comment){
 				VTR_LOG("\n");
 				VTR_LOG_WARN("This RR graph file is based on %s while your input architecture file is %s, compatibility issues may arise.\n", tool_comment, get_arch_file_name());
@@ -342,7 +557,7 @@ void on_start_element(void *ctx, const xmlChar *_name, const xmlChar **_attrs){
 	/* Look up callback function from current and previous tags. */
 	auto fn = parse_table[prev_tag][current_tag];
 	if(fn != NULL){
-		(*fn)(attrs);
+		(*fn)();
 		return;
 	}
 	/* TODO: Maybe implement reverse enum lookup for this. */
@@ -363,66 +578,64 @@ void on_characters(void *ctx, const xmlChar *_ch, int len){
 	auto top = parser_stack[parser_stack_top];
 	if(top == T_META){
 		strncpy(text, ch, len);
-		current_meta_value = std::string(text);
 		if(current_meta_place == NODE){
-			vpr::add_rr_node_metadata(current_node_id, current_meta_name, current_meta_value);
+			vpr::add_rr_node_metadata(current_node_id, current_meta_name, text);
 		} else if(current_meta_place == EDGE){
 			vpr::add_rr_edge_metadata(current_edge.src_id, current_edge.sink_id, current_edge.switch_id,
-								current_meta_name, current_meta_value);
+								current_meta_name, text);
 		}
 	}
 }
 
 
-void consume_channels(const char **attrs){
+void consume_channels(void){
 	return;
 }
-void consume_switches(const char **attrs){
+void consume_switches(void){
 	return;
 }
-void consume_segments(const char **attrs){
+void consume_segments(void){
 	return;
 }
-void consume_block_types(const char **attrs){
+void consume_block_types(void){
 	return;
 }
-void consume_grid(const char **attrs){
+void consume_grid(void){
 	return;
 }
-void consume_rr_nodes(const char **attrs){
+void consume_rr_nodes(void){
 	return;
 }
-void consume_rr_edges(const char **attrs){
+void consume_rr_edges(void){
 	return;
 }
 /* Load channel info into chan_width(nodes_per_chan in load_rr_file) */
-void consume_channel(const char **attrs){
-	auto& device_ctx = g_vpr_ctx.mutable_device();
-	chan_width->max = std::atoi(get_attr("chan_width_max", attrs));
-	chan_width->x_min = std::atoi(get_attr("x_min", attrs));
-	chan_width->y_min = std::atoi(get_attr("y_min", attrs));
-	chan_width->x_max = std::atoi(get_attr("x_max", attrs));
-	chan_width->y_max = std::atoi(get_attr("y_max", attrs));
+void consume_channel(void){
+	chan_width->max = std::atoi(get_attr(T_CHAN_WIDTH_MAX));
+	chan_width->x_min = std::atoi(get_attr(T_X_MIN));
+	chan_width->y_min = std::atoi(get_attr(T_Y_MIN));
+	chan_width->x_max = std::atoi(get_attr(T_X_MAX));
+	chan_width->y_max = std::atoi(get_attr(T_Y_MAX));
 }
-void consume_x_list(const char **attrs){
-	int index = std::atoi(get_attr("index", attrs));
-	chan_width->x_list[index] = std::atof(get_attr("info", attrs));
+void consume_x_list(void){
+	int index = std::atoi(get_attr(T_INDEX));
+	chan_width->x_list[index] = std::atof(get_attr(T_INFO));
 }
-void consume_y_list(const char **attrs){
-	int index = std::atoi(get_attr("index", attrs));
-	chan_width->y_list[index] = std::atof(get_attr("info", attrs));
+void consume_y_list(void){
+	int index = std::atoi(get_attr(T_INDEX));
+	chan_width->y_list[index] = std::atof(get_attr(T_INFO));
 }
 
 /* Process switch info and push it back to device_ctx.rr_switch_inf[]. When <timing> or <sizing> arrives,
  * the corresponding callback picks up the last item in device_ctx.rr_switch_inf[] and continues to fill it.
  * TODO: Switch types are in a namespace SwitchType but no other thing-type is. Figure out why. */
-void consume_switch(const char **attrs){
+void consume_switch(void){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	t_rr_switch_inf sw = {};
-	const char *name = get_attr_optional("name", attrs);
+	const char *name = get_attr_optional(T_NAME);
 	if(name != NULL) sw.name = vtr::strdup(name);
 
-	std::string type = get_attr("type", attrs);
+	std::string type = get_attr(T_TYPE);
 	if(type == "mux") sw.set_type(SwitchType::MUX);
 	else if(type == "tristate") sw.set_type(SwitchType::TRISTATE);
 	else if(type == "pass_gate") sw.set_type(SwitchType::PASS_GATE);
@@ -433,67 +646,67 @@ void consume_switch(const char **attrs){
 }
 /* map's operator[] gives default value for nonexistent keys:
  * http://www.cplusplus.com/reference/map/map/operator%5B%5D/ */
-void consume_switch_timing(const char **attrs){
+void consume_switch_timing(void){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	auto& sw = device_ctx.rr_switch_inf.back();
 
-	const char *R = get_attr_optional("R", attrs);
+	const char *R = get_attr_optional(T_R);
 	if(R != NULL) sw.R = std::atof(R);
-	const char *Cin = get_attr_optional("Cin", attrs);
+	const char *Cin = get_attr_optional(T_CIN);
 	if(Cin != NULL) sw.Cin = std::atof(Cin);
-	const char *Cout = get_attr_optional("Cout", attrs);
+	const char *Cout = get_attr_optional(T_COUT);
 	if(Cout != NULL) sw.Cout = std::atof(Cout);
-	const char *Tdel = get_attr_optional("Tdel", attrs);
+	const char *Tdel = get_attr_optional(T_TDEL);
 	if(Tdel != NULL) sw.Tdel = std::atof(Tdel);
 }
-void consume_switch_sizing(const char **attrs){
+void consume_switch_sizing(void){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	auto& sw = device_ctx.rr_switch_inf.back();
-	sw.mux_trans_size = std::atof(get_attr("mux_trans_size", attrs));
-	sw.buf_size = std::atof(get_attr("buf_size", attrs));
+	sw.mux_trans_size = std::atof(get_attr(T_MUX_TRANS_SIZE));
+	sw.buf_size = std::atof(get_attr(T_BUF_SIZE));
 }
 
 /* Segments were initialized from the architecture file. Therefore, we don't need
  * to copy segments into memory but we can check them against the arch file.
  * TODO: really do this. This requires some global state and it's not the whole point of the SAX
  * implementation, so skipped for now. */
-void consume_segment(const char **attrs){
+void consume_segment(void){
 }
-void consume_segment_timing(const char **attrs){
+void consume_segment_timing(void){
 }
 
 /* Blocks were initialized from the architecture file. Therefore, we don't need
  * to copy block_types into memory but we can check them against the arch file.
  * TODO: really do this. This requires some global state and it's not the whole point of the SAX
  * implementation, so skipped for now. */
-void consume_block_type(const char **attrs){
+void consume_block_type(void){
 	return;
 }
-void consume_pin_class(const char **attrs){
+void consume_pin_class(void){
 	return;
 }
-void consume_pin(const char **attrs){
+void consume_pin(void){
 	return;
 }
 
 /* Grid was initialized from the architecture file. Therefore, we don't need
  * to copy grid_locs into memory but we can check them against the arch file. */
-void consume_grid_loc(const char **attrs){
-	int x = std::atoi(get_attr("x", attrs));
-	int y = std::atoi(get_attr("y", attrs));
+void consume_grid_loc(void){
+	int x = std::atoi(get_attr(T_X));
+	int y = std::atoi(get_attr(T_Y));
 	const t_grid_tile& grid_tile = (*g_grid)[x][y];
 
-	int block_type_id = std::atoi(get_attr("block_type_id", attrs));
+	int block_type_id = std::atoi(get_attr(T_BLOCK_TYPE_ID));
 	if (grid_tile.type->index != block_type_id) {
 			vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__,
 					"Architecture file does not match RR graph's block_type_id at (%d, %d): arch used ID %d, RR graph used ID %d.", x, y,
 					 (grid_tile.type->index), block_type_id);
 		 }
-		 if (grid_tile.width_offset != std::atof(get_attr("width_offset", attrs))) {
+		 if (grid_tile.width_offset != std::atof(get_attr(T_WIDTH_OFFSET))) {
 			vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__,
 					"Architecture file does not match RR graph's width_offset at (%d, %d)", x, y);
 	}
-		 if (grid_tile.width_offset !=  std::atof(get_attr("height_offset", attrs))) {
+		 if (grid_tile.width_offset !=  std::atof(get_attr(T_HEIGHT_OFFSET))) {
 			vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__,
 					"Architecture file does not match RR graph's height_offset at (%d, %d)", x, y);
 	}
@@ -501,56 +714,55 @@ void consume_grid_loc(const char **attrs){
 
 /* Process node info and push it back to device_ctx.rr_nodes[]. When <loc> or <timing> arrives,
  * the corresponding callback picks up the last item in device_ctx.rr_nodes[] and continues to fill it. */
-void consume_node(const char **attrs){
+void consume_node(void){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
+	current_node_id = std::atoi(get_attr(T_ID));
 	t_rr_node node;
-	current_node_id = std::atoi(get_attr("id", attrs));
-	std::string type = get_attr("type", attrs);
-	if(type == "CHANX"){
+	const char *type = get_attr(T_TYPE);
+	if(strcmp(type, "CHANX") == 0){
 		node.set_type(CHANX);
-	} else if(type == "CHANY"){
+	} else if(strcmp(type, "CHANY") == 0){
 		node.set_type(CHANY);
-	} else if(type == "SOURCE"){
+	} else if(strcmp(type, "SOURCE") == 0){
 		node.set_type(SOURCE);
-	} else if(type == "SINK"){
+	} else if(strcmp(type, "SINK") == 0){
 		node.set_type(SINK);
-	} else if(type == "OPIN"){
+	} else if(strcmp(type, "OPIN") == 0){
 		node.set_type(OPIN);
-	} else if(type == "IPIN"){
+	} else if(strcmp(type, "IPIN") == 0){
 		node.set_type(IPIN);
 	} else {
 		vpr_throw(VPR_ERROR_OTHER, __FILE__, __LINE__,
 			"Valid inputs for class types are \"CHANX\", \"CHANY\",\"SOURCE\", \"SINK\",\"OPIN\", and \"IPIN\".");
 	}
 	if(node.type() == CHANX || node.type() == CHANY){
-		std::string dir = get_attr("direction", attrs);
-		if(dir == "INC_DIR"){
+		const char *dir = get_attr(T_DIRECTION);
+		if(strcmp(dir, "INC_DIR") == 0){
 			node.set_direction(INC_DIRECTION);
-		} else if(dir == "DEC_DIR"){
+		} else if(strcmp(dir, "DEC_DIR") == 0){
 			node.set_direction(DEC_DIRECTION);
-		} else if(dir == "BI_DIR"){
+		} else if(strcmp(dir, "BI_DIR") == 0){
 			node.set_direction(BI_DIRECTION);
 		} else {
-			VTR_ASSERT(dir == "NO_DIR");
+			VTR_ASSERT(strcmp(dir, "NO_DIR") == 0);
 			node.set_direction(NO_DIRECTION);
 		}
 	}
-	node.set_capacity(std::atoi(get_attr("capacity", attrs)));
-	node.set_num_edges(0);
+	node.set_capacity(std::atoi(get_attr(T_CAPACITY)));
 	device_ctx.rr_nodes.push_back(std::move(node));
 }
-void consume_node_loc(const char **attrs){
+void consume_node_loc(void){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	auto& node = device_ctx.rr_nodes[current_node_id];
 	short x1, x2, y1, y2;
-	x1 = std::atoi(get_attr("xlow", attrs));
-	y1 = std::atoi(get_attr("ylow", attrs));
-	x2 = std::atoi(get_attr("xhigh", attrs));
-	y2 = std::atoi(get_attr("yhigh", attrs));
+	x1 = std::atoi(get_attr(T_XLOW));
+	y1 = std::atoi(get_attr(T_YLOW));
+	x2 = std::atoi(get_attr(T_XHIGH));
+	y2 = std::atoi(get_attr(T_YHIGH));
 	node.set_coordinates(x1, y1, x2, y2);
-	node.set_ptc_num(std::atoi(get_attr("ptc", attrs)));
+	node.set_ptc_num(std::atoi(get_attr(T_PTC)));
 	if(node.type() == IPIN || node.type() == OPIN){
-		std::string side = get_attr("side", attrs);
+		std::string side = get_attr(T_SIDE);
 		if(side == "LEFT") node.set_side(LEFT);
 		else if(side == "RIGHT") node.set_side(RIGHT);
 		else if(side == "TOP") node.set_side(TOP);
@@ -560,13 +772,13 @@ void consume_node_loc(const char **attrs){
 		}
 	}
 }
-void consume_node_timing(const char **attrs){
+void consume_node_timing(void){
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 	auto& node = device_ctx.rr_nodes[current_node_id];
 	float R = 0, C = 0;
-	const char *R_text = get_attr_optional("R", attrs);
+	const char *R_text = get_attr_optional(T_R);
 	if(R_text != NULL) R = std::atof(R_text);
-	const char *C_text = get_attr_optional("C", attrs);
+	const char *C_text = get_attr_optional(T_C);
 	if(C_text != NULL) C = std::atof(C_text);
 	node.set_rc_index(find_create_rr_rc_data(R, C));
 }
@@ -576,9 +788,8 @@ static std::unordered_map<int, int> seg_id_map;
  * segment_ids with nodes. I have no idea why. But we give in and fill a map with
  * segment_ids to know which node ID corresponds to which segment ID. After the
  * whole parsing, segments will be inserted using those IDs. */
-void consume_node_segment(const char **attrs){
-	auto& device_ctx = g_vpr_ctx.mutable_device();
-	const char *segment_id = get_attr_optional("segment_id", attrs);
+void consume_node_segment(void){
+	const char *segment_id = get_attr_optional(T_SEGMENT_ID);
 	if(segment_id != NULL){
 		seg_id_map[current_node_id] = std::atoi(segment_id);
 	}
@@ -587,26 +798,26 @@ void consume_node_segment(const char **attrs){
 /* Since <metadata> involves a child element *and* a text node, this is a bit hard.
  * We set up the current <meta> struct in global state in the start_element handlers(here)
  * and push it in the on_characters handle, where we have the full information. */
-void consume_node_metadata(const char **attrs){
+void consume_node_metadata(void){
 	current_meta_place = NODE;
 }
-void consume_edge_metadata(const char **attrs){
+void consume_edge_metadata(void){
 	current_meta_place = EDGE;
 }
-void consume_meta(const char **attrs){
-	current_meta_name = get_attr("name", attrs);
+void consume_meta(void){
+	current_meta_name = get_attr(T_NAME);
 }
 
 /* Add an edge to the source node, save it in global variable current_edge.
  * Also track the most frequently appearing switch that connects a CHANX/CHANY node
  * to a IPIN node. This is done here because there is no easy way to iterate over all edges. */
-void consume_edge(const char ** attrs){
+void consume_edge(void){
 	int source_node_id, sink_node_id, switch_id;
 	auto& device_ctx = g_vpr_ctx.mutable_device();
 
-	current_edge.src_id = source_node_id = std::atoi(get_attr("src_node", attrs));
-	current_edge.sink_id = sink_node_id = std::atoi(get_attr("sink_node", attrs));
-	current_edge.switch_id = switch_id = std::atoi(get_attr("switch_id", attrs));
+	current_edge.src_id = source_node_id = std::atoi(get_attr(T_SRC_NODE));
+	current_edge.sink_id = sink_node_id = std::atoi(get_attr(T_SINK_NODE));
+	current_edge.switch_id = switch_id = std::atoi(get_attr(T_SWITCH_ID));
 	auto& source_node = device_ctx.rr_nodes[source_node_id];
 	source_node.add_edge(sink_node_id, switch_id);
 
