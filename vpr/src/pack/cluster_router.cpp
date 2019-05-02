@@ -1479,3 +1479,14 @@ static std::string describe_congested_rr_nodes(const std::vector<int>& congested
 
     return description;
 }
+
+void reset_intra_lb_route(t_lb_router_data *router_data) {
+    for(auto &node : *router_data->lb_type_graph) {
+        auto *pin = node.pb_graph_pin;
+        if(pin == nullptr) {
+            continue;
+        }
+        VTR_ASSERT(pin->parent_node != nullptr);
+        pin->parent_node->illegal_modes.clear();
+    }
+}

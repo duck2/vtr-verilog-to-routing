@@ -639,6 +639,7 @@ std::map<t_type_ptr,size_t> do_clustering(const t_packer_opts& packer_opts, cons
 			if (detailed_routing_stage == (int)E_DETAILED_ROUTE_AT_END_ONLY) {
 				// FIXME: is_mode_conflict does not affect this stage. It will be needed when trying to route the packed clusters later on.
 				bool is_mode_conflict;
+				reset_intra_lb_route(router_data);
 				is_cluster_legal = try_intra_lb_route(router_data, packer_opts.pack_verbosity, &is_mode_conflict);
 				if (is_cluster_legal == true) {
                     VTR_LOGV(packer_opts.pack_verbosity > 2, "\tPassed route at end.\n");
@@ -1217,6 +1218,7 @@ static enum e_block_pack_status try_pack_molecule(
 				bool is_mode_conflict = true;
 				bool is_routed = false;
 				bool do_detailed_routing_stage = detailed_routing_stage == (int)E_DETAILED_ROUTE_FOR_EACH_ATOM;
+				reset_intra_lb_route(router_data);
 				while (do_detailed_routing_stage && is_mode_conflict) {
 					is_routed = try_intra_lb_route(router_data, verbosity, &is_mode_conflict);
 				}
