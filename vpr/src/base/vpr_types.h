@@ -878,6 +878,7 @@ struct t_router_opts {
     int max_convergence_count;
     float reconvergence_cpd_threshold;
     std::string first_iteration_timing_report_file;
+    bool disable_check_route;
 };
 
 struct t_analysis_opts {
