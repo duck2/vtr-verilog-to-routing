@@ -1337,6 +1337,11 @@ static argparse::ArgumentParser create_arg_parser(std::string prog_name, t_optio
             .default_value("")
             .show_in(argparse::ShowIn::HELP_ONLY);
 
+    route_timing_grp.add_argument<bool,ParseOnOff>(args.disable_check_route, "--disable_check_route")
+            .help("Disables check_route once routing step has finished or when routing file is loaded")
+            .default_value("off")
+            .show_in(argparse::ShowIn::HELP_ONLY);
+
     auto& analysis_grp = parser.add_argument_group("analysis options");
 
     analysis_grp.add_argument<bool,ParseOnOff>(args.full_stats, "--full_stats")
